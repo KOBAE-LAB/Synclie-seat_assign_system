@@ -8,13 +8,15 @@ export const metadata: Metadata = {
   title: "講師ログイン",
 };
 
-export default async function TeacherLoginPage() {
+export default async function TeacherLoginPage({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
   if (await getCurrentTeacher()) redirect("/teacher");
+  const { deleted } = await searchParams;
 
   return (
     <main className="page">
       <section className="card auth-card">
         <h1>講師ログイン</h1>
+        {deleted ? <p className="notice" role="status">アカウントを削除しました。ご利用ありがとうございました。</p> : null}
         <LoginForm />
         <ul className="link-list">
           <li>

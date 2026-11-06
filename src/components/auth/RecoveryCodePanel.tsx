@@ -7,7 +7,7 @@ type Props = {
   loginId: string;
   recoveryCode: string;
   /** アカウント作成直後か、パスワード再設定後か */
-  context: "signup" | "reset";
+  context: "signup" | "reset" | "reissue";
 };
 
 /** 復元コードを 1 回だけ表示する画面（再表示はできない） */
@@ -31,7 +31,9 @@ export function RecoveryCodePanel({ loginId, recoveryCode, context }: Props) {
       <p>
         {context === "signup"
           ? "講師アカウントを作成しました。"
-          : "パスワードを再設定しました。前の復元コードはもう使えません。"}
+          : context === "reissue"
+            ? "復元コードを新しく発行しました。前の復元コードはもう使えません。"
+            : "パスワードを再設定しました。前の復元コードはもう使えません。"}
         パスワードを忘れたときは、ログインIDとこの復元コードで再設定します。
       </p>
       <p className="muted">ログインID：{loginId}</p>
