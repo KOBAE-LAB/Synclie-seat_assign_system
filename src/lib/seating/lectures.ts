@@ -18,7 +18,27 @@ export type LectureSummary = {
   acceptState: AcceptState;
   classroomName: string;
   drawnCount: number;
+  folder: string;
+  tags: string[];
+  archived: boolean;
 };
+
+export type LectureFilter = { folder?: string; tag?: string; q?: string; archived?: boolean };
+
+export const FOLDER_MAX = 50;
+export const TAG_MAX = 20;
+export const TAGS_PER_LECTURE = 10;
+export const MEMO_MAX = 2000;
+
+/** 「数学, 1年 、前期」→ ["数学", "1年", "前期"]（重複・空を除く） */
+export function parseTags(input: string): string[] {
+  const tags = input
+    .split(/[,、，\s]+/)
+    .map((t) => t.trim().replace(/^#/, ""))
+    .filter(Boolean)
+    .map((t) => t.slice(0, TAG_MAX));
+  return [...new Set(tags)].slice(0, TAGS_PER_LECTURE);
+}
 
 export type SeatInfo = {
   id: number;
@@ -38,6 +58,9 @@ export type Lecture = {
   messageFurigana: string;
   messageEn: string;
   memo: string;
+  folder: string;
+  tags: string[];
+  archived: boolean;
   acceptState: AcceptState;
   publicToken: string;
   classroomName: string;
@@ -54,17 +77,81 @@ export function generatePublicToken(): string {
   return crypto.randomBytes(12).toString("base64url");
 }
 
-export function listLectures(db: Db, teacherId: number): LectureSummary[] {
-  return db
+export function listLectures(db: Db, teacherId: number, filter: LectureFilter = {}): LectureSummary[] {
+  const where = ["l.owner_teacher_id = ?", "l.archived = ?"];
+  const args: (string | number)[] = [teacherId, filter.archived ? 1 : 0];
+  if (filter.folder !== undefined) {
+    where.push("l.folder = ?");
+    args.push(filter.folder);
+  }
+  if (filter.tag) {
+    where.push("EXISTS (SELECT 1 FROM json_each(l.tags_json) WHERE value = ?)");
+    args.push(filter.tag);
+  }
+  if (filter.q) {
+    where.push("(l.name LIKE ? ESCAPE '\\' OR l.memo LIKE ? ESCAPE '\\')");
+    const like = `%${filter.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    args.push(like, like);
+  }
+  const rows = db
     .prepare(
       `SELECT l.id, l.name, l.lecture_date AS lectureDate, l.enrolled_count AS enrolledCount,
-              l.accept_state AS acceptState, c.name AS classroomName,
+              l.accept_state AS acceptState, c.name AS classroomName, l.folder, l.tags_json, l.archived,
               (SELECT count(*) FROM draws d WHERE d.lecture_id = l.id AND d.cancelled = 0) AS drawnCount
          FROM lectures l JOIN classrooms c ON c.id = l.classroom_id
-        WHERE l.owner_teacher_id = ? AND l.archived = 0
+        WHERE ${where.join(" AND ")}
         ORDER BY COALESCE(l.lecture_date, '') DESC, l.id DESC`,
     )
-    .all(teacherId) as LectureSummary[];
+    .all(...args) as (Omit<LectureSummary, "tags" | "archived"> & { tags_json: string; archived: number })[];
+  return rows.map(({ tags_json, archived, ...r }) => ({ ...r, tags: JSON.parse(tags_json) as string[], archived: archived === 1 }));
+}
+
+/** 講師が使っているフォルダとタグの一覧（絞り込み用） */
+export function listFoldersAndTags(db: Db, teacherId: number): { folders: string[]; tags: string[] } {
+  const folders = (
+    db
+      .prepare("SELECT DISTINCT folder FROM lectures WHERE owner_teacher_id = ? AND folder <> '' ORDER BY folder")
+      .all(teacherId) as { folder: string }[]
+  ).map((r) => r.folder);
+  const tags = (
+    db
+      .prepare(
+        `SELECT DISTINCT j.value AS tag FROM lectures l, json_each(l.tags_json) j
+          WHERE l.owner_teacher_id = ? ORDER BY tag`,
+      )
+      .all(teacherId) as { tag: string }[]
+  ).map((r) => r.tag);
+  return { folders, tags };
+}
+
+/** メモ・フォルダ・タグを更新する */
+export function updateLectureOrganize(
+  db: Db,
+  teacherId: number,
+  id: number,
+  input: { memo: string; folder: string; tags: string[] },
+): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE lectures SET memo = ?, folder = ?, tags_json = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ? AND owner_teacher_id = ?`,
+      )
+      .run(input.memo, input.folder, JSON.stringify(input.tags), id, teacherId).changes > 0
+  );
+}
+
+/** アーカイブ（一覧から外し、学生の QR も使えなくする）／戻す */
+export function setArchived(db: Db, teacherId: number, id: number, archived: boolean): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE lectures SET archived = ?, accept_state = CASE WHEN ? = 1 THEN 'closed' ELSE accept_state END,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ? AND owner_teacher_id = ?`,
+      )
+      .run(archived ? 1 : 0, archived ? 1 : 0, id, teacherId).changes > 0
+  );
 }
 
 export type CreateLectureInput = {
@@ -133,6 +220,9 @@ type LectureRow = {
   message_furigana: string;
   message_en: string;
   memo: string;
+  folder: string;
+  tags_json: string;
+  archived: number;
   accept_state: AcceptState;
   public_token: string;
   layout_json: string;
@@ -163,6 +253,9 @@ function loadLecture(db: Db, row: LectureRow | undefined): Lecture | null {
     messageFurigana: row.message_furigana,
     messageEn: row.message_en,
     memo: row.memo,
+    folder: row.folder,
+    tags: JSON.parse(row.tags_json) as string[],
+    archived: row.archived === 1,
     acceptState: row.accept_state,
     publicToken: row.public_token,
     classroomName: row.classroom_name,
@@ -173,7 +266,7 @@ function loadLecture(db: Db, row: LectureRow | undefined): Lecture | null {
 }
 
 const LECTURE_SELECT = `
-  SELECT l.id, l.name, l.lecture_date, l.enrolled_count, l.message_ja, l.message_furigana, l.message_en, l.memo, l.accept_state,
+  SELECT l.id, l.name, l.lecture_date, l.enrolled_count, l.message_ja, l.message_furigana, l.message_en, l.memo, l.folder, l.tags_json, l.archived, l.accept_state,
          l.public_token, l.layout_json, c.name AS classroom_name
     FROM lectures l JOIN classrooms c ON c.id = l.classroom_id`;
 

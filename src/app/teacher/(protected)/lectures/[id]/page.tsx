@@ -9,6 +9,7 @@ import {
   cancelDrawAction,
   deleteLectureAction,
   issueTtCodeAction,
+  setArchivedAction,
   moveDrawAction,
   revokeTtCodeAction,
   proxyDrawAction,
@@ -64,6 +65,14 @@ export default async function LecturePage({
           </div>
         </div>
         {query.saved === "info" ? <p className="notice" role="status">講義の設定を保存しました。</p> : null}
+        {lecture.archived ? <p className="notice">この講義はアーカイブ済みです（学生の QR は使えません）。</p> : null}
+        {lecture.folder || lecture.tags.length ? (
+          <p className="tag-line">
+            {lecture.folder ? <span className="folder-chip">📁 {lecture.folder}</span> : null}
+            {lecture.tags.map((t) => <span key={t} className="tag-chip">#{t}</span>)}
+          </p>
+        ) : null}
+        {lecture.memo ? <p className="memo"><span className="small muted">メモ：</span>{lecture.memo}</p> : null}
 
         <div className="lecture-top">
           <div>
@@ -200,6 +209,17 @@ export default async function LecturePage({
       </section>
 
       <section className="card">
+        <h2>出力</h2>
+        <div className="stack">
+          <a href={`/teacher/lectures/${lecture.id}/csv`} className="button button--secondary">CSV をダウンロード</a>
+          <a href={`/teacher/lectures/${lecture.id}/qr`} className="button button--secondary">QR 画像（PNG）</a>
+          <Link href={`/teacher/lectures/${lecture.id}/print?kind=result`} className="button button--secondary">座席図と結果を印刷・PDF</Link>
+          <Link href={`/teacher/lectures/${lecture.id}/print?kind=labels`} className="button button--secondary">座席ラベルを印刷</Link>
+          <Link href={`/teacher/lectures/${lecture.id}/print?kind=qr`} className="button button--secondary">QR を掲示用に印刷</Link>
+        </div>
+      </section>
+
+      <section className="card">
         <h2>その他の操作</h2>
         <div className="stack">
           {lecture.acceptState !== "before" ? (
@@ -207,6 +227,13 @@ export default async function LecturePage({
               <button type="submit" className="button button--secondary">受付前に戻す</button>
             </form>
           ) : null}
+          <form action={setArchivedAction.bind(null, lecture.id, !lecture.archived)}>
+            {lecture.archived ? (
+              <button type="submit" className="button button--secondary">アーカイブから戻す</button>
+            ) : (
+              <ConfirmButton message="アーカイブすると一覧から外れ、受付を終了し、学生の QR も使えなくなります（あとで戻せます）。よろしいですか？">アーカイブする</ConfirmButton>
+            )}
+          </form>
           <form action={resetDrawsAction.bind(null, lecture.id)}>
             <ConfirmButton message="すべての抽選結果を取り消します。よろしいですか？">抽選をすべてリセット</ConfirmButton>
           </form>

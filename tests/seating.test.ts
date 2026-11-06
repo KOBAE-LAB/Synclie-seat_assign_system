@@ -15,7 +15,16 @@ import {
   withSeats,
 } from "../src/lib/seating/layout.ts";
 import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, type Desk } from "../src/lib/seating/geometry.ts";
-import { saveClassroom, deleteClassroom, listClassrooms } from "../src/lib/seating/classrooms.ts";
+import {
+  copyClassroomByShareCode,
+  deleteClassroom,
+  getShareCode,
+  issueShareCode,
+  listClassrooms,
+  revokeShareCode,
+  saveClassroom,
+} from "../src/lib/seating/classrooms.ts";
+import { csvCell, safeFileName, toCsv } from "../src/lib/seating/csv.ts";
 import {
   createLecture,
   formatTtCode,
@@ -24,7 +33,12 @@ import {
   getLectureByTtCode,
   getTtCode,
   issueTtCode,
+  listFoldersAndTags,
+  listLectures,
   normalizeTtCode,
+  parseTags,
+  setArchived,
+  updateLectureOrganize,
   revokeTtCode,
   setAcceptState,
   toggleSeatStatus,
@@ -316,4 +330,57 @@ test("TT・参観コード：発行・照合・再発行・無効化", () => {
   assert.equal(getLectureByTtCode(db, code), null, "再発行すると前のコードは使えない");
   assert.ok(revokeTtCode(db, teacherId, lectureId));
   assert.equal(getLectureByTtCode(db, next), null);
+});
+
+test("CSV のエスケープ（Excel の数式対策・BOM・CRLF）", () => {
+  assert.equal(csvCell('a,"b"'), '"a,""b"""');
+  assert.equal(csvCell("=1+1"), "'=1+1");
+  assert.equal(csvCell(null), "");
+  const csv = toCsv([["席", "グループ"], [1, "A"]]);
+  assert.ok(csv.startsWith("﻿席,グループ\r\n1,A\r\n"));
+  assert.equal(safeFileName('情報 リテラシー/第5回:"'), "情報_リテラシー_第5回_");
+});
+
+test("講義のフォルダ・タグ・メモ・検索・アーカイブ", () => {
+  const a = makeLecture(10).lectureId;
+  const b = makeLecture(10).lectureId;
+  assert.deepEqual(parseTags("数学, 1年 、前期,#数学"), ["数学", "1年", "前期"]);
+  updateLectureOrganize(db, teacherId, a, { memo: "教科書 p.20 から", folder: "2026 前期", tags: ["数学", "1年"] });
+  updateLectureOrganize(db, teacherId, b, { memo: "", folder: "", tags: ["英語"] });
+  assert.deepEqual(listLectures(db, teacherId, { folder: "2026 前期" }).map((l) => l.id), [a]);
+  assert.deepEqual(listLectures(db, teacherId, { tag: "英語" }).map((l) => l.id), [b]);
+  assert.deepEqual(listLectures(db, teacherId, { q: "p.20" }).map((l) => l.id), [a], "メモも検索する");
+  assert.equal(listLectures(db, teacherId, { q: "100%" }).length, 0, "% は文字として扱う");
+  assert.deepEqual(listFoldersAndTags(db, teacherId), { folders: ["2026 前期"], tags: ["1年", "数学", "英語"] });
+  const lecture = getLecture(db, teacherId, a)!;
+  assert.deepEqual([lecture.folder, lecture.tags, lecture.memo], ["2026 前期", ["数学", "1年"], "教科書 p.20 から"]);
+  // アーカイブすると一覧から外れ、受付は終了、学生の QR は使えない
+  setAcceptState(db, teacherId, a, "open");
+  assert.ok(setArchived(db, teacherId, a, true));
+  assert.deepEqual(listLectures(db, teacherId).map((l) => l.id), [b]);
+  assert.deepEqual(listLectures(db, teacherId, { archived: true }).map((l) => l.id), [a]);
+  assert.equal(getLecture(db, teacherId, a)!.acceptState, "closed");
+  assert.equal(getLectureByToken(db, lecture.publicToken), null);
+  assert.ok(setArchived(db, teacherId, a, false));
+  assert.ok(getLectureByToken(db, lecture.publicToken));
+});
+
+test("教室の共有コードでほかの講師がコピーできる", () => {
+  const { classroomId } = makeLecture(10);
+  const other = Number(
+    db.prepare("INSERT INTO teachers (login_id, password_hash, recovery_code_hash) VALUES ('teacher2', 'h', 'r')").run()
+      .lastInsertRowid,
+  );
+  assert.equal(copyClassroomByShareCode(db, other, "AAAA-AAAA"), null);
+  const code = issueShareCode(db, teacherId, classroomId)!;
+  assert.equal(issueShareCode(db, other, classroomId), null, "持ち主以外は発行できない");
+  const copied = copyClassroomByShareCode(db, other, code.toLowerCase())!;
+  const mine = listClassrooms(db, other);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].id, copied);
+  assert.equal(mine[0].name, "301（コピー）");
+  assert.equal(mine[0].seatCount, 24);
+  assert.ok(revokeShareCode(db, teacherId, classroomId));
+  assert.equal(copyClassroomByShareCode(db, other, code), null, "無効化したら使えない");
+  assert.equal(getShareCode(db, teacherId, classroomId), null);
 });
