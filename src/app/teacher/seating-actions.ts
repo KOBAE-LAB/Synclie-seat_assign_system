@@ -98,6 +98,7 @@ export async function createLectureAction(_prev: ActionState, formData: FormData
   const messageJa = field(formData, "messageJa");
   if (messageJa.length > MESSAGE_MAX) return { error: `メッセージは ${MESSAGE_MAX} 文字以内にしてください。` };
 
+  const seatFill = field(formData, "seatFill") === "front" ? "front" : "even";
   let groupMode: GroupMode = { kind: "none" };
   const mode = field(formData, "groupMode");
   if (mode === "island") groupMode = { kind: "island" };
@@ -119,6 +120,7 @@ export async function createLectureAction(_prev: ActionState, formData: FormData
     messageFurigana: messageJa ? await safeFurigana(messageJa) : "",
     messageEn: messageJa ? ((await translateToEnglish(messageJa)) ?? "") : "",
     groupMode,
+    seatFill,
   });
   if (!id) return { error: "教室が見つからないか、席がありません。" };
   redirect(`/teacher/lectures/${id}`);

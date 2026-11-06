@@ -376,9 +376,42 @@ export function apportion(total: number, weights: number[]): number[] {
  * 受講者数に合わせて「使用」する席を島ごとに均等に選ぶ。残りは予備席。
  * 戻り値は使用する席番号の集合。
  */
-export function chooseUsedSeats(layout: ClassroomLayout, enrolled: number): Set<number> {
+/** 使用席の選び方：even＝島ごとに全体へ均等に散らす、front＝黒板に近い席から詰める */
+export type SeatFill = "even" | "front";
+
+/**
+ * 前方（黒板側）からの距離。黒板があれば黒板の面からの距離、なければ y（上が前）。
+ * 黒板が横や後ろの壁にあっても、黒板に近いほど小さい。
+ */
+export function frontDistance(layout: ClassroomLayout): (p: { x: number; y: number }) => number {
+  const board =
+    layout.fixtures.find((f) => f.type === "board") ?? layout.fixtures.find((f) => f.type === "screen");
+  if (!board) return (p) => p.y;
+  const t = (board.rotation * Math.PI) / 180;
+  // 黒板の面に垂直な向き（回転 0° のとき下向き）
+  const nx = -Math.sin(t);
+  const ny = Math.cos(t);
+  return (p) => Math.abs((p.x - board.x) * nx + (p.y - board.y) * ny);
+}
+
+/**
+ * 受講者数に合わせて「使用」する席を選ぶ。残りは予備席。戻り値は使用する席番号の集合。
+ * - even：島ごとに、席数に比例して均等に散らす
+ * - front：黒板に近い席から順に（同じ距離なら席番号の小さい順）
+ */
+export function chooseUsedSeats(layout: ClassroomLayout, enrolled: number, fill: SeatFill = "even"): Set<number> {
+  const k = Math.max(0, Math.min(enrolled, layout.seats.length));
+  if (fill === "front") {
+    const dist = frontDistance(layout);
+    // 同じ列（距離の差が 20 cm 以内）は席番号順にそろえる
+    const ordered = [...layout.seats].sort((a, b) => {
+      const d = dist(a) - dist(b);
+      return Math.abs(d) > 20 ? d : a.number - b.number;
+    });
+    return new Set(ordered.slice(0, k).map((s) => s.number));
+  }
   const islands = findIslands(layout);
-  const counts = apportion(Math.min(enrolled, layout.seats.length), islands.map((i) => i.length));
+  const counts = apportion(k, islands.map((i) => i.length));
   const used = new Set<number>();
   islands.forEach((island, idx) => {
     for (const i of spreadIndexes(island.length, counts[idx])) used.add(island[i]);
@@ -455,8 +488,13 @@ export function assignGroups(layout: ClassroomLayout, used: ReadonlySet<number>,
 }
 
 /** 講義の座席・グループ構成を決める */
-export function planLecture(layout: ClassroomLayout, enrolled: number, mode: GroupMode): SeatPlan {
-  const used = chooseUsedSeats(layout, enrolled);
+export function planLecture(
+  layout: ClassroomLayout,
+  enrolled: number,
+  mode: GroupMode,
+  fill: SeatFill = "even",
+): SeatPlan {
+  const used = chooseUsedSeats(layout, enrolled, fill);
   const numbers = layout.seats.map((s) => s.number).sort((a, b) => a - b);
   const { groups, groupOf } = assignGroups(layout, used, mode);
   return {

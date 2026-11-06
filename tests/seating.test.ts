@@ -506,3 +506,29 @@ test("ドア・窓は壁の近くで壁の線に吸い付き、壁に沿う向�
   const r = validateLayout(JSON.stringify(l));
   assert.ok(r.ok && r.layout.width === 800 && r.layout.height === 1000);
 });
+
+test("使用席の選び方：前から詰める", () => {
+  // 黒板が前（上）：前の列から
+  const used = chooseUsedSeats(layout, 8, "front");
+  assert.equal(used.size, 8);
+  const front = [...layout.seats].sort((a, b) => a.y - b.y).slice(0, 6).map((s) => s.number);
+  for (const n of front) assert.ok(used.has(n), `${n} は最前列なので使用席`);
+  const maxUsedY = Math.max(...layout.seats.filter((s) => used.has(s.number)).map((s) => s.y));
+  const minSpareY = Math.min(...layout.seats.filter((s) => !used.has(s.number)).map((s) => s.y));
+  assert.ok(maxUsedY <= minSpareY, "使用席は予備席より前");
+  // 黒板が後ろの壁にあれば、後ろから
+  const back = { ...layout, fixtures: [{ id: "b", type: "board" as const, x: 300, y: layout.height, w: 300, h: 16, rotation: 0 }] };
+  const usedBack = chooseUsedSeats(back, 6, "front");
+  const maxY = Math.max(...layout.seats.map((s) => s.y));
+  assert.ok(layout.seats.filter((s) => usedBack.has(s.number)).every((s) => s.y === maxY), "最後列が使用席");
+  // 均等（既定）は島ごとに散らす
+  const even = chooseUsedSeats(layout, 8);
+  assert.deepEqual(findIslands(layout).map((i) => i.filter((n) => even.has(n)).length), [4, 4]);
+  // 講義作成で使える
+  const classroomId = saveClassroom(db, teacherId, { name: "前詰め", layout })!;
+  const id = createLecture(db, teacherId, {
+    classroomId, name: "前詰め", lectureDate: null, enrolledCount: 6, messageJa: "", groupMode: { kind: "none" }, seatFill: "front",
+  })!;
+  const seats = getLecture(db, teacherId, id)!.seats.filter((s) => s.status === "used").map((s) => s.number).sort((a, b) => a - b);
+  assert.deepEqual(seats, front.sort((a, b) => a - b));
+});
