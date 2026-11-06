@@ -23,10 +23,10 @@ export default async function TtViewPage() {
   return (
     <main className="page page--wide">
       <AutoRefresh />
-      <section className="card">
+      <section className="card card--accent">
         <div className="card__head">
           <div>
-            <p className="small muted">TT・参観用（閲覧のみ）</p>
+            <p className="eyebrow">OBSERVER VIEW ・ 閲覧のみ</p>
             <h1>{lecture.name}</h1>
             <p className="muted small">{lecture.lectureDate ?? "日付なし"}・{lecture.classroomName}・受講者 {lecture.enrolledCount} 人</p>
           </div>

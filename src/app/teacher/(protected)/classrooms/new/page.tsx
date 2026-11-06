@@ -15,7 +15,8 @@ export default function NewClassroomPage() {
   return (
     <main className="page page--wide">
       <p><Link href="/teacher">← 講義一覧へ</Link></p>
-      <section className="card">
+      <section className="card card--accent">
+        <p className="eyebrow">CLASSROOM</p>
         <h1>教室を作る</h1>
         <ClassroomEditor initialLayout={initial} />
       </section>

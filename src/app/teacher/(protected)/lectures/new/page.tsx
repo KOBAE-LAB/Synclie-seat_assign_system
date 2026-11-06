@@ -15,7 +15,8 @@ export default async function NewLecturePage() {
   return (
     <main className="page">
       <p><Link href="/teacher">← 講義一覧へ</Link></p>
-      <section className="card">
+      <section className="card card--accent">
+        <p className="eyebrow">LECTURE</p>
         <h1>講義を作る</h1>
         <LectureForm classrooms={classrooms} />
       </section>

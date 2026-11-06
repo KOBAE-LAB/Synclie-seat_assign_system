@@ -27,6 +27,11 @@ export default async function ScreenPage({ params }: { params: Promise<{ id: str
     <div className="screen">
       <AutoRefresh />
       <div className="screen__side">
+        <p className="screen__brand">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/neutral.png" alt="" width={44} height={44} />
+          SYNCLIE ・ 座席・グループ抽選
+        </p>
         <p className="screen__title">{lecture.name}</p>
         <div className="screen__qr" dangerouslySetInnerHTML={{ __html: qrSvg }} />
         <p className="screen__lead">
