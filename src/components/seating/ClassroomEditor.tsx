@@ -26,6 +26,8 @@ import {
   renumberSeats,
   ROOM_MAX,
   ROOM_MIN,
+  contentExtent,
+  SEAT_MAX,
   withSeats,
   type ClassroomLayout,
 } from "@/lib/seating/layout";
@@ -76,6 +78,8 @@ export function ClassroomEditor({
     return rest;
   });
   const [history, setHistory] = useState<Room[]>([]);
+  const [notice, setNotice] = useState("");
+  const [roomDraft, setRoomDraft] = useState<{ width: string; height: string } | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [customSeats, setCustomSeats] = useState(3);
   const [customW, setCustomW] = useState(150);
@@ -218,16 +222,37 @@ export function ClassroomEditor({
   }
 
   function runArrange(replace: boolean) {
-    update((r) => {
-      const base = replace ? { ...r, desks: [] } : r;
-      const desks = arrangeDesks(
-        { ...arrange, customSeats, customW, customH },
-        nextSeatNumber(withSeats(base)),
-        newId("a"),
-      ).filter((d) => d.x <= r.width && d.y <= r.height);
-      return { ...base, desks: [...base.desks, ...desks] };
-    });
+    const base = replace ? { ...room, desks: [] } : room;
+    const desks = arrangeDesks(
+      { ...arrange, customSeats, customW, customH },
+      nextSeatNumber(withSeats(base)),
+      newId("a"),
+    ).filter((d) => d.x <= ROOM_MAX && d.y <= ROOM_MAX);
+    const total = withSeats(base).seats.length + desks.reduce((n, d) => n + d.seats.length, 0);
+    if (total > SEAT_MAX) {
+      setNotice(`席が ${total} 席になるため並べられません（${SEAT_MAX} 席まで）。縦・横の数を減らしてください。`);
+      return;
+    }
+    setNotice("");
+    const fitted = fitRoom({ ...base, desks: [...base.desks, ...desks] });
+    update(() => fitted);
     setSelection(null);
+  }
+
+  /** 机・備品が部屋からはみ出したら、部屋を広げて収める */
+  function fitRoom(r: Room): Room {
+    const need = contentExtent(r);
+    if (need.width <= r.width && need.height <= r.height) return r;
+    setNotice(`机が部屋に収まるよう、部屋を ${Math.max(r.width, need.width)} × ${Math.max(r.height, need.height)} cm に広げました。`);
+    return { ...r, width: Math.min(ROOM_MAX, Math.max(r.width, need.width)), height: Math.min(ROOM_MAX, Math.max(r.height, need.height)) };
+  }
+
+  /** 部屋の大きさの入力を確定する（入力中は反映せず、欄を離れたときに反映。中身より小さくはしない） */
+  function commitRoomSize(key: "width" | "height", text: string) {
+    const need = contentExtent(room)[key];
+    const n = clamp(toInt(text, room[key]), Math.max(ROOM_MIN, need), ROOM_MAX);
+    if (n !== room[key]) update((r) => ({ ...r, [key]: n }));
+    if (toInt(text, n) < need) setNotice(`机や備品が収まるよう、${key === "width" ? "幅" : "奥行き"}は ${need} cm 以上にしました。`);
   }
 
   // ---- ドラッグ ----
@@ -309,7 +334,7 @@ export function ClassroomEditor({
   for (let y = 50; y < room.height; y += 50) gridLines.push(<line key={`y${y}`} x1={0} y1={y} x2={room.width} y2={y} />);
 
   return (
-    <form action={formAction} className="editor">
+    <form action={formAction} className="editor" noValidate>
       {id ? <input type="hidden" name="id" value={id} /> : null}
       <input type="hidden" name="layout" value={JSON.stringify(layout)} />
 
@@ -321,13 +346,19 @@ export function ClassroomEditor({
         <div className="editor__room">
           <label>
             部屋の幅{" "}
-            <input className="input input--narrow" type="number" min={ROOM_MIN} max={ROOM_MAX} step={50} value={room.width}
-              onChange={(e) => update((r) => ({ ...r, width: clamp(toInt(e.target.value, r.width), ROOM_MIN, ROOM_MAX) }))} /> cm
+            <input className="input input--narrow" type="number" min={ROOM_MIN} max={ROOM_MAX} step={50}
+              value={roomDraft?.width ?? String(room.width)}
+              onChange={(e) => setRoomDraft({ width: e.target.value, height: roomDraft?.height ?? String(room.height) })}
+              onBlur={(e) => { commitRoomSize("width", e.target.value); setRoomDraft(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} /> cm
           </label>
           <label>
             奥行き{" "}
-            <input className="input input--narrow" type="number" min={ROOM_MIN} max={ROOM_MAX} step={50} value={room.height}
-              onChange={(e) => update((r) => ({ ...r, height: clamp(toInt(e.target.value, r.height), ROOM_MIN, ROOM_MAX) }))} /> cm
+            <input className="input input--narrow" type="number" min={ROOM_MIN} max={ROOM_MAX} step={50}
+              value={roomDraft?.height ?? String(room.height)}
+              onChange={(e) => setRoomDraft({ width: roomDraft?.width ?? String(room.width), height: e.target.value })}
+              onBlur={(e) => { commitRoomSize("height", e.target.value); setRoomDraft(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} /> cm
           </label>
         </div>
       </div>
@@ -505,6 +536,7 @@ export function ClassroomEditor({
         </aside>
       </div>
 
+      {notice ? <p className="notice" role="status">{notice}</p> : null}
       {state.error ? <p className="form-error" role="alert">{state.error}</p> : null}
       <div className="stack" style={{ marginTop: 16 }}>
         <button type="submit" className="button" disabled={pending}>

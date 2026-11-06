@@ -12,7 +12,7 @@ import {
   saveClassroom,
 } from "@/lib/seating/classrooms";
 import { RATE_LIMIT_MESSAGE, RateLimiter } from "@/lib/auth/rate-limit";
-import { parseLayout, type GroupMode } from "@/lib/seating/layout";
+import { validateLayout, type GroupMode } from "@/lib/seating/layout";
 import {
   createLecture,
   deleteLecture,
@@ -63,8 +63,9 @@ export async function saveClassroomAction(_prev: ActionState, formData: FormData
   const name = field(formData, "name");
   const nameError = classroomNameError(name);
   if (nameError) return { error: nameError };
-  const layout = parseLayout(field(formData, "layout"));
-  if (!layout) return { error: "レイアウトのデータが正しくありません。" };
+  const checked = validateLayout(field(formData, "layout"));
+  if (!checked.ok) return { error: checked.error };
+  const layout = checked.layout;
   if (layout.seats.length === 0) return { error: "席を 1 つ以上置いてください。" };
   const idText = field(formData, "id");
   const id = saveClassroom(getDb(), teacher.teacherId, { id: idText ? Number(idText) : undefined, name, layout });

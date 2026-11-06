@@ -5,6 +5,7 @@ import {
   apportion,
   arrangeDesks,
   chooseUsedSeats,
+  contentExtent,
   emptyLayout,
   findIslands,
   groupName,
@@ -12,6 +13,7 @@ import {
   planLecture,
   renumberSeats,
   spreadIndexes,
+  validateLayout,
   withSeats,
 } from "../src/lib/seating/layout.ts";
 import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, type Desk } from "../src/lib/seating/geometry.ts";
@@ -71,14 +73,14 @@ test("旧形式（マス目）のレイアウトは学生机の配置に変換�
 
 test("parseLayout は不正な入力を拒否し、座席は机から計算し直す", () => {
   assert.equal(parseLayout("not json"), null);
-  assert.equal(parseLayout({ kind: "free", width: 10, height: 800, desks: [], fixtures: [] }), null);
+  assert.equal(parseLayout({ kind: "free", width: 9000, height: 800, desks: [], fixtures: [] }), null, "部屋が大きすぎる");
   const base = { kind: "free", version: 2, width: 1000, height: 800, fixtures: [] };
   const desk = { id: "a", type: "long2", x: 100, y: 100, rotation: 0, seats: [1, 2] };
   assert.ok(parseLayout({ ...base, desks: [desk] }));
   assert.equal(parseLayout({ ...base, desks: [{ ...desk, seats: [1] }] }), null, "長机は 2 席");
   assert.equal(parseLayout({ ...base, desks: [desk, { ...desk, id: "b" }] }), null, "席番号の重複");
   assert.equal(parseLayout({ ...base, desks: [{ ...desk, type: "sofa" }] }), null, "知らない種類");
-  assert.equal(parseLayout({ ...base, desks: [{ ...desk, x: 5000 }] }), null, "部屋の外");
+  assert.equal(parseLayout({ ...base, desks: [{ ...desk, x: 6000 }] }), null, "上限（50 m）より外");
   assert.equal(parseLayout({ ...base, desks: [{ ...desk, id: "a b" }] }), null, "不正な ID");
   assert.equal(parseLayout({ ...base, desks: [{ id: "c", type: "custom", x: 100, y: 100, rotation: 0, seats: [1, 2, 3] }] }), null, "カスタムは大きさが必要");
   const custom = parseLayout({ ...base, desks: [{ id: "c", type: "custom", x: 100, y: 100, rotation: 7, w: 200, h: 50, seats: [1, 2, 3] }] })!;
@@ -87,6 +89,32 @@ test("parseLayout は不正な入力を拒否し、座席は机から計算し�
   // クライアントが送った seats は無視して机から計算する
   const forged = parseLayout({ ...base, desks: [desk], seats: [{ number: 99, x: 0, y: 0, deskId: "a" }] })!;
   assert.deepEqual(forged.seats.map((s) => s.number), [1, 2]);
+});
+
+test("机が部屋からはみ出していたら、拒否せず部屋を広げて保存する", () => {
+  // 幅の入力中に一瞬 200 cm になった、などの状態
+  const desks = arrangeDesks({ type: "student", rows: 6, cols: 8, pitchX: 80, pitchY: 95, startX: 100, startY: 130 }, 1, "a");
+  const shrunk = { ...withSeats({ ...emptyLayout(1000, 800), desks }), width: 200, height: 200 };
+  const r = validateLayout(JSON.stringify(shrunk));
+  assert.ok(r.ok);
+  assert.ok(r.layout.width >= 700 && r.layout.height >= 700, `広がった: ${r.layout.width}x${r.layout.height}`);
+  assert.equal(r.layout.seats.length, 48);
+  const extent = contentExtent(r.layout);
+  assert.ok(extent.width <= r.layout.width && extent.height <= r.layout.height);
+  // 大きい部屋はそのまま
+  assert.equal(validateLayout(JSON.stringify({ ...shrunk, width: 1500, height: 1200 })).ok && 1500, 1500);
+});
+
+test("保存できない理由を具体的に返す", () => {
+  const base = { kind: "free", version: 2, width: 1000, height: 800, fixtures: [] };
+  const d = (id: string, seats: number[]) => ({ id, type: "student", x: 100, y: 100, rotation: 0, seats });
+  const dup = validateLayout({ ...base, desks: [d("a", [3]), d("b", [3])] });
+  assert.ok(!dup.ok && dup.error.includes("席番号 3 が重なっています"));
+  const many = validateLayout({ ...base, desks: Array.from({ length: 301 }, (_, i) => d(`d${i}`, [i + 1])) });
+  assert.ok(!many.ok && many.error.includes("机は 300 台まで"));
+  const label = validateLayout({ ...base, desks: [], fixtures: [{ id: "f", type: "other", x: 1, y: 1, w: 10, h: 10, rotation: 0, label: "あ".repeat(31) }] });
+  assert.ok(!label.ok && label.error.includes("30 文字"));
+  assert.ok(!validateLayout("{").ok);
 });
 
 test("机の種類ごとの席数と、回転による座席位置", () => {

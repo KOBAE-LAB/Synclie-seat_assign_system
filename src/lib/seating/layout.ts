@@ -11,6 +11,8 @@ import {
   deskBox,
   deskSeatPositions,
   FIXTURE_SPECS,
+  fixtureBox,
+  mergeBoxes,
   normalizeRotation,
   type Desk,
   type DeskType,
@@ -194,40 +196,76 @@ function parseFixture(v: unknown, room: { width: number; height: number }): Fixt
   return f;
 }
 
-/** 外部から来た JSON を検証してレイアウトにする。不正なら null（旧形式は変換する） */
-export function parseLayout(input: unknown): ClassroomLayout | null {
+export type LayoutCheck = { ok: true; layout: ClassroomLayout } | { ok: false; error: string };
+
+/** 机・備品は部屋の外（最大 ROOM_MAX まで）に出ていても受け付け、部屋を広げて収める */
+const ANY_POSITION = { width: ROOM_MAX, height: ROOM_MAX };
+const ROOM_MARGIN = 40;
+
+/**
+ * 外部から来た JSON を検証してレイアウトにする（旧形式は変換する）。
+ * だめなときは講師に見せる理由を返す。
+ */
+export function validateLayout(input: unknown): LayoutCheck {
+  const bad = (error: string): LayoutCheck => ({ ok: false, error });
   if (typeof input === "string") {
     try {
       input = JSON.parse(input);
     } catch {
-      return null;
+      return bad("レイアウトのデータを読み取れませんでした。ページを再読み込みしてください。");
     }
   }
-  if (!input || typeof input !== "object") return null;
+  if (!input || typeof input !== "object") return bad("レイアウトのデータがありません。");
   const o = input as Record<string, unknown>;
-  if (o.kind === "grid" || (o.rows !== undefined && o.cols !== undefined)) return parseGrid(o);
-  if (o.kind !== "free") return null;
-  if (!isInt(o.width, ROOM_MIN, ROOM_MAX) || !isInt(o.height, ROOM_MIN, ROOM_MAX)) return null;
-  if (!Array.isArray(o.desks) || o.desks.length > DESK_MAX) return null;
-  if (!Array.isArray(o.fixtures) || o.fixtures.length > FIXTURE_MAX) return null;
-  const room = { width: o.width, height: o.height };
+  if (o.kind === "grid" || (o.rows !== undefined && o.cols !== undefined)) {
+    const grid = parseGrid(o);
+    return grid ? { ok: true, layout: grid } : bad("古い形式のレイアウトを読み取れませんでした。");
+  }
+  if (o.kind !== "free") return bad("レイアウトの形式が正しくありません。");
+  if (!isNum(o.width, 1, ROOM_MAX) || !isNum(o.height, 1, ROOM_MAX)) {
+    return bad(`部屋の幅・奥行きは ${ROOM_MAX} cm 以内にしてください。`);
+  }
+  if (!Array.isArray(o.desks) || o.desks.length > DESK_MAX) return bad(`机は ${DESK_MAX} 台までです。`);
+  if (!Array.isArray(o.fixtures) || o.fixtures.length > FIXTURE_MAX) return bad(`備品は ${FIXTURE_MAX} 個までです。`);
   const desks: Desk[] = [];
   for (const d of o.desks) {
-    const desk = parseDesk(d, room);
-    if (!desk) return null;
+    const desk = parseDesk(d, ANY_POSITION);
+    if (!desk) return bad("机のデータに不正なものがあります（位置・種類・席数など）。ページを再読み込みしてください。");
     desks.push(desk);
   }
   const fixtures: Fixture[] = [];
   for (const f of o.fixtures) {
-    const fixture = parseFixture(f, room);
-    if (!fixture) return null;
+    const fixture = parseFixture(f, ANY_POSITION);
+    if (!fixture) return bad("備品のデータに不正なものがあります（位置・大きさ・表示名は 30 文字まで など）。");
     fixtures.push(fixture);
   }
   const ids = [...desks.map((d) => d.id), ...fixtures.map((f) => f.id)];
-  if (new Set(ids).size !== ids.length) return null;
+  if (new Set(ids).size !== ids.length) return bad("同じ ID の机・備品があります。ページを再読み込みしてください。");
   const numbers = desks.flatMap((d) => d.seats);
-  if (numbers.length > SEAT_MAX || new Set(numbers).size !== numbers.length) return null;
-  return withSeats({ version: 2, kind: "free", width: room.width, height: room.height, desks, fixtures });
+  if (numbers.length > SEAT_MAX) return bad(`席は ${SEAT_MAX} 席までです（今 ${numbers.length} 席）。`);
+  const dup = numbers.find((n, i) => numbers.indexOf(n) !== i);
+  if (dup !== undefined) return bad(`席番号 ${dup} が重なっています。「席番号を前から振り直す」を押してください。`);
+
+  // はみ出した机・備品が収まるよう部屋を広げる（ROOM_MIN 以上・ROOM_MAX 以下）
+  const need = contentExtent({ desks, fixtures });
+  const width = Math.round(Math.min(ROOM_MAX, Math.max(o.width, need.width)));
+  const height = Math.round(Math.min(ROOM_MAX, Math.max(o.height, need.height)));
+  return { ok: true, layout: withSeats({ version: 2, kind: "free", width, height, desks, fixtures }) };
+}
+
+/** validateLayout の結果だけ欲しいとき（不正なら null） */
+export function parseLayout(input: unknown): ClassroomLayout | null {
+  const r = validateLayout(input);
+  return r.ok ? r.layout : null;
+}
+
+/** 部屋の中身（机・備品）が収まる最小の幅・奥行き（ROOM_MIN 以上） */
+export function contentExtent(layout: Pick<ClassroomLayout, "desks" | "fixtures">): { width: number; height: number } {
+  const box = mergeBoxes([...layout.desks.map(deskBox), ...layout.fixtures.map(fixtureBox)]);
+  return {
+    width: Math.ceil(Math.max(ROOM_MIN, box ? box.maxX + ROOM_MARGIN : 0)),
+    height: Math.ceil(Math.max(ROOM_MIN, box ? box.maxY + ROOM_MARGIN : 0)),
+  };
 }
 
 /** 机どうしのすき間が ISLAND_GAP 以下ならつなげた、席番号のかたまり（島）。島は最小の席番号順 */
