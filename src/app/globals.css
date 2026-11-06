@@ -703,6 +703,7 @@ a {
 }
 .message {
   white-space: pre-wrap;
+  margin-top: var(--space-4);
   border-left: 4px solid var(--line-soft);
   padding-left: var(--space-3);
 }
@@ -834,4 +835,52 @@ a {
   width: auto;
   padding: 2px var(--space-1);
   font-size: 14px;
+}
+
+/* 学生画面の言語切り替え */
+.lang-switch {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0;
+  margin-bottom: var(--space-3);
+}
+.lang-switch__button {
+  font: inherit;
+  font-size: 14px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 44px;
+}
+.lang-switch__button + .lang-switch__button {
+  border-left: none;
+}
+.lang-switch__button--active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+.lang-switch__button rt {
+  font-size: 9px;
+}
+rt {
+  font-size: 0.55em;
+}
+.message__from {
+  margin: 0;
+}
+.message__body {
+  margin: var(--space-1) 0 0;
+  line-height: 2.1;
+}
+.result__prefix {
+  font-size: 0.8em;
+}
+.ruby-preview {
+  border: 1px dashed var(--line-soft);
+  padding: var(--space-2) var(--space-3);
+  line-height: 2.2;
+  margin: var(--space-2) 0 0;
 }
