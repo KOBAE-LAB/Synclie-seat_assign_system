@@ -11,8 +11,6 @@ import {
   deskBox,
   deskSeatPositions,
   FIXTURE_SPECS,
-  fixtureBox,
-  mergeBoxes,
   normalizeRotation,
   type Desk,
   type DeskType,
@@ -200,7 +198,6 @@ export type LayoutCheck = { ok: true; layout: ClassroomLayout } | { ok: false; e
 
 /** 机・備品は部屋の外（最大 ROOM_MAX まで）に出ていても受け付け、部屋を広げて収める */
 const ANY_POSITION = { width: ROOM_MAX, height: ROOM_MAX };
-const ROOM_MARGIN = 40;
 
 /**
  * 外部から来た JSON を検証してレイアウトにする（旧形式は変換する）。
@@ -259,13 +256,32 @@ export function parseLayout(input: unknown): ClassroomLayout | null {
   return r.ok ? r.layout : null;
 }
 
-/** 部屋の中身（机・備品）が収まる最小の幅・奥行き（ROOM_MIN 以上） */
+/**
+ * 部屋の中身（机・備品）の中心がすべて入る最小の幅・奥行き（ROOM_MIN 以上）。
+ * 壁に沿って置いた備品（ドア・窓など）は中心が壁の上にあるので、余白は足さない
+ * （余白を足すと、保存するたびに部屋が少しずつ広がってしまう）。
+ */
 export function contentExtent(layout: Pick<ClassroomLayout, "desks" | "fixtures">): { width: number; height: number } {
-  const box = mergeBoxes([...layout.desks.map(deskBox), ...layout.fixtures.map(fixtureBox)]);
+  const items = [...layout.desks, ...layout.fixtures];
   return {
-    width: Math.ceil(Math.max(ROOM_MIN, box ? box.maxX + ROOM_MARGIN : 0)),
-    height: Math.ceil(Math.max(ROOM_MIN, box ? box.maxY + ROOM_MARGIN : 0)),
+    width: Math.ceil(Math.max(ROOM_MIN, ...items.map((i) => i.x))),
+    height: Math.ceil(Math.max(ROOM_MIN, ...items.map((i) => i.y))),
   };
+}
+
+/** 部屋を width × height にする。はみ出す机・備品は新しい壁ぎわに寄せる。寄せた数も返す */
+export function resizeRoom<T extends Pick<ClassroomLayout, "desks" | "fixtures" | "width" | "height">>(
+  layout: T,
+  width: number,
+  height: number,
+): { layout: T; moved: number } {
+  let moved = 0;
+  const fit = <I extends { x: number; y: number }>(i: I): I => {
+    if (i.x <= width && i.y <= height) return i;
+    moved++;
+    return { ...i, x: Math.min(i.x, width), y: Math.min(i.y, height) };
+  };
+  return { layout: { ...layout, width, height, desks: layout.desks.map(fit), fixtures: layout.fixtures.map(fit) }, moved };
 }
 
 /** 机どうしのすき間が ISLAND_GAP 以下ならつなげた、席番号のかたまり（島）。島は最小の席番号順 */
