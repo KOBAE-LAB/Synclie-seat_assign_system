@@ -8,7 +8,7 @@ export function SiteHeader() {
           <span>Synclie</span> 座席抽選
         </Link>
         <nav className="site-header__nav" aria-label="メインメニュー">
-          <Link href="/teacher/login">教員ログイン</Link>
+          <Link href="/teacher/login">講師ログイン</Link>
         </nav>
       </div>
     </header>

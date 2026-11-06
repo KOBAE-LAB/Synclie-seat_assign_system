@@ -126,4 +126,25 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX idx_draws_lecture ON draws (lecture_id, cancelled);
     `,
   },
+  {
+    version: 2,
+    name: "teacher_auth",
+    sql: /* sql */ `
+      -- ログイン ID は大文字・小文字を区別せず一意にする（"Kobae" と "kobae" を別人にしない）
+      CREATE UNIQUE INDEX uq_teachers_login_id_nocase ON teachers (login_id COLLATE NOCASE);
+
+      -- 教員のログインセッション（Cookie にはトークン本体、DB には SHA-256 のみ保存）
+      CREATE TABLE teacher_sessions (
+        id            INTEGER PRIMARY KEY,
+        token_hash    TEXT    NOT NULL UNIQUE,
+        teacher_id    INTEGER NOT NULL REFERENCES teachers (id) ON DELETE CASCADE,
+        created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        expires_at    TEXT    NOT NULL,
+        last_seen_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      ) STRICT;
+
+      CREATE INDEX idx_teacher_sessions_teacher ON teacher_sessions (teacher_id);
+      CREATE INDEX idx_teacher_sessions_expires ON teacher_sessions (expires_at);
+    `,
+  },
 ];

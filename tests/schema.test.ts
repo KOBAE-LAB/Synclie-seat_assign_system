@@ -53,7 +53,15 @@ test("マイグレーションが最新バージョンまで適用され、再�
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
     .all()
     .map((r) => (r as { name: string }).name);
-  for (const t of ["teachers", "classrooms", "lectures", "lecture_groups", "lecture_seats", "draws"]) {
+  for (const t of [
+    "teachers",
+    "teacher_sessions",
+    "classrooms",
+    "lectures",
+    "lecture_groups",
+    "lecture_seats",
+    "draws",
+  ]) {
     assert.ok(tables.includes(t), `${t} テーブルがある`);
   }
   assert.equal(db.pragma("foreign_keys", { simple: true }), 1);
