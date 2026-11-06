@@ -395,8 +395,14 @@ export type SeatPlan = {
 };
 
 /** 講義の座席・グループ構成を決める */
-export function planLecture(layout: ClassroomLayout, enrolled: number, mode: GroupMode): SeatPlan {
-  const used = chooseUsedSeats(layout, enrolled);
+export type GroupAssignment = {
+  groups: { name: string; color: string; order: number }[];
+  /** 席番号 → グループの番号（groups の添字） */
+  groupOf: Map<number, number>;
+};
+
+/** 使用席 used をもとに、グループの分け方 mode でグループを決める（講義作成時・作り直し時に共通） */
+export function assignGroups(layout: ClassroomLayout, used: ReadonlySet<number>, mode: GroupMode): GroupAssignment {
   const numbers = layout.seats.map((s) => s.number).sort((a, b) => a - b);
   const groupOf = new Map<number, number>();
   let groupCount = 0;
@@ -428,6 +434,17 @@ export function planLecture(layout: ClassroomLayout, enrolled: number, mode: Gro
       color: GROUP_COLORS[i % GROUP_COLORS.length],
       order: i,
     })),
+    groupOf,
+  };
+}
+
+/** 講義の座席・グループ構成を決める */
+export function planLecture(layout: ClassroomLayout, enrolled: number, mode: GroupMode): SeatPlan {
+  const used = chooseUsedSeats(layout, enrolled);
+  const numbers = layout.seats.map((s) => s.number).sort((a, b) => a - b);
+  const { groups, groupOf } = assignGroups(layout, used, mode);
+  return {
+    groups,
     seats: numbers.map((n) => ({
       number: n,
       status: used.has(n) ? "used" : "spare",

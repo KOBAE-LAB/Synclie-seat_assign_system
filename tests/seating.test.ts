@@ -46,6 +46,7 @@ import {
   toggleSeatStatus,
 } from "../src/lib/seating/lectures.ts";
 import { cancelDraw, drawForDevice, listDraws, moveDraw, proxyDraw, resetDraws } from "../src/lib/seating/draws.ts";
+import { addGroup, assignSeatsToGroup, deleteGroup, regroupLecture, updateGroup } from "../src/lib/seating/groups.ts";
 
 /** 旧形式（マス目）の JSON：cols 列のうち 4 列目ごとが通路 */
 function oldGridJson(rows: number, cols: number) {
@@ -411,4 +412,53 @@ test("教室の共有コードでほかの講師がコピーできる", () => {
   assert.ok(revokeShareCode(db, teacherId, classroomId));
   assert.equal(copyClassroomByShareCode(db, other, code), null, "無効化したら使えない");
   assert.equal(getShareCode(db, teacherId, classroomId), null);
+});
+
+test("講義のグループ：追加・名前と色・席の割り当て・削除・作り直し", () => {
+  const { lectureId, token } = makeLecture(10);
+  const before = getLecture(db, teacherId, lectureId)!;
+  assert.equal(before.groups.length, 4);
+  // 追加：空いている名前と色
+  const added = addGroup(db, teacherId, lectureId)!;
+  let lecture = getLecture(db, teacherId, lectureId)!;
+  const g = lecture.groups.find((x) => x.id === added)!;
+  assert.equal(g.name, "E");
+  assert.ok(!before.groups.some((x) => x.color === g.color), "色が重ならない");
+  assert.equal(addGroup(db, teacherId + 1, lectureId), null, "他の講師は追加できない");
+  // 名前・色の変更
+  assert.deepEqual(updateGroup(db, teacherId, lectureId, added, { name: "  ゼミ班 ", color: "#123abc" }), { ok: true });
+  assert.ok(!updateGroup(db, teacherId, lectureId, added, { name: "", color: "#123abc" }).ok);
+  assert.ok(!updateGroup(db, teacherId, lectureId, added, { name: "x", color: "red" }).ok);
+  // 席の割り当て
+  assert.equal(assignSeatsToGroup(db, teacherId, lectureId, [1, 2, 3], added), 3);
+  lecture = getLecture(db, teacherId, lectureId)!;
+  assert.deepEqual(lecture.seats.filter((s) => s.groupId === added).map((s) => s.number), [1, 2, 3]);
+  assert.equal(lecture.seats.find((s) => s.number === 1)!.groupName, "ゼミ班");
+  // 抽選済みの学生の結果にも新しいグループが出る
+  setAcceptState(db, teacherId, lectureId, "open");
+  const r = drawForDevice(db, token, uuid(1));
+  assert.ok(r.ok);
+  assignSeatsToGroup(db, teacherId, lectureId, [r.seatNumber], added);
+  const again = drawForDevice(db, token, uuid(1));
+  assert.ok(again.ok && again.groupName === "ゼミ班");
+  // ほかの講義のグループには入れられない
+  const other = makeLecture(5).lectureId;
+  const otherGroup = getLecture(db, teacherId, other)!.groups[0].id;
+  assert.equal(assignSeatsToGroup(db, teacherId, lectureId, [4], otherGroup), 0);
+  // グループなしに戻す
+  assert.equal(assignSeatsToGroup(db, teacherId, lectureId, [1], null), 1);
+  // 削除：席はグループなしになる
+  assert.ok(deleteGroup(db, teacherId, lectureId, added));
+  lecture = getLecture(db, teacherId, lectureId)!;
+  assert.ok(!lecture.groups.some((x) => x.id === added));
+  assert.equal(lecture.seats.find((s) => s.number === 2)!.groupId, null);
+  // 作り直し：島ごと（2 島）、使用席・予備席はそのまま
+  const usedBefore = lecture.seats.filter((s) => s.status === "used").map((s) => s.number);
+  assert.deepEqual(regroupLecture(db, teacherId, lectureId, { kind: "island" }), { ok: true });
+  lecture = getLecture(db, teacherId, lectureId)!;
+  assert.equal(lecture.groups.length, 2);
+  assert.ok(lecture.seats.every((s) => s.groupId !== null));
+  assert.deepEqual(lecture.seats.filter((s) => s.status === "used").map((s) => s.number), usedBefore);
+  regroupLecture(db, teacherId, lectureId, { kind: "none" });
+  assert.equal(getLecture(db, teacherId, lectureId)!.groups.length, 0);
 });
