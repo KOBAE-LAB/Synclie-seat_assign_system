@@ -399,7 +399,37 @@ export function frontDistance(layout: ClassroomLayout): (p: { x: number; y: numb
  * - even：島ごとに、席数に比例して均等に散らす
  * - front：黒板に近い席から順に（同じ距離なら席番号の小さい順）
  */
-export function chooseUsedSeats(layout: ClassroomLayout, enrolled: number, fill: SeatFill = "even"): Set<number> {
+/** 前（黒板側）から数えた座席の列。同じ列＝黒板からの距離の差が 40 cm 以内 */
+export function seatRowsFromFront(layout: ClassroomLayout, tolerance = 40): number[][] {
+  const dist = frontDistance(layout);
+  const sorted = [...layout.seats].sort((a, b) => dist(a) - dist(b) || a.number - b.number);
+  const rows: { d: number; seats: number[] }[] = [];
+  for (const s of sorted) {
+    const d = dist(s);
+    const row = rows.at(-1);
+    if (row && d - row.d <= tolerance) row.seats.push(s.number);
+    else rows.push({ d, seats: [s.number] });
+  }
+  return rows.map((r) => r.seats.sort((a, b) => a - b));
+}
+
+export function chooseUsedSeats(
+  layout: ClassroomLayout,
+  enrolled: number,
+  fill: SeatFill = "even",
+  skipFrontRows = 0,
+): Set<number> {
+  if (skipFrontRows > 0) {
+    // 前の列を使わない：残りの席から選び、足りなければ使わない列の後ろ側から足す
+    const rows = seatRowsFromFront(layout);
+    const skipped = rows.slice(0, skipFrontRows).flat();
+    const skippedSet = new Set(skipped);
+    const rest: ClassroomLayout = { ...layout, seats: layout.seats.filter((s) => !skippedSet.has(s.number)) };
+    const used = chooseUsedSeats(rest, enrolled, fill, 0);
+    const lack = Math.min(enrolled, layout.seats.length) - used.size;
+    if (lack > 0) for (const n of rows.slice(0, skipFrontRows).reverse().flat().slice(0, lack)) used.add(n);
+    return used;
+  }
   const k = Math.max(0, Math.min(enrolled, layout.seats.length));
   if (fill === "front") {
     const dist = frontDistance(layout);
@@ -419,12 +449,48 @@ export function chooseUsedSeats(layout: ClassroomLayout, enrolled: number, fill:
   return used;
 }
 
-export type GroupMode = { kind: "none" } | { kind: "island" } | { kind: "count"; count: number };
+export type GroupMode =
+  | { kind: "none" }
+  | { kind: "island" }
+  | { kind: "count"; count: number }
+  /** size 人ひと組（割り切れないときは alt 人ひと組も使う） */
+  | { kind: "size"; size: number; alt?: number | null };
 
+export type GroupOptions = {
+  /** 予備席（不使用の席）はグループなしにする */
+  spareNoGroup?: boolean;
+};
+
+/**
+ * u 人を size 人の組に分ける。alt があれば、size の組をできるだけ多くしつつ、残りを alt 人の組で割り切る。
+ * 割り切れないときは、最後に人数の少ない組を 1 つ作る。例：14 人・4 か 3 → [4, 4, 3, 3]
+ */
+export function splitGroupSizes(u: number, size: number, alt?: number | null): number[] {
+  if (u <= 0 || size <= 0) return [];
+  const b = alt && alt > 0 && alt !== size ? alt : null;
+  if (b) {
+    for (let a = Math.floor(u / size); a >= 0; a--) {
+      const rest = u - a * size;
+      if (rest % b === 0) return [...Array(a).fill(size), ...Array(rest / b).fill(b)];
+    }
+  }
+  const a = Math.floor(u / size);
+  let rest = u - a * size;
+  const out = Array(a).fill(size);
+  if (b) {
+    const nb = Math.floor(rest / b);
+    out.push(...Array(nb).fill(b));
+    rest -= nb * b;
+  }
+  if (rest > 0) out.push(rest);
+  return out;
+}
+
+/** グループの色（16 色。隣どうしで見分けやすい順） */
 export const GROUP_COLORS = [
   "#800b16", "#0041c2", "#1b7f3b", "#b35c00", "#6a3d9a", "#00838f", "#8d6e00", "#c2185b",
-  "#455a64", "#5d4037",
-];
+  "#455a64", "#5d4037", "#7cb342", "#283593", "#ad1457", "#00695c", "#e65100", "#9e9d24",
+]
 
 export function groupName(index: number): string {
   // A, B, ..., Z, AA, AB, ...
@@ -451,7 +517,12 @@ export type GroupAssignment = {
 };
 
 /** 使用席 used をもとに、グループの分け方 mode でグループを決める（講義作成時・作り直し時に共通） */
-export function assignGroups(layout: ClassroomLayout, used: ReadonlySet<number>, mode: GroupMode): GroupAssignment {
+export function assignGroups(
+  layout: ClassroomLayout,
+  used: ReadonlySet<number>,
+  mode: GroupMode,
+  options: GroupOptions = {},
+): GroupAssignment {
   const numbers = layout.seats.map((s) => s.number).sort((a, b) => a - b);
   const groupOf = new Map<number, number>();
   let groupCount = 0;
@@ -468,13 +539,31 @@ export function assignGroups(layout: ClassroomLayout, used: ReadonlySet<number>,
     sizes.forEach((size, gi) => {
       for (let k = 0; k < size; k++) groupOf.set(usedSorted[i++], gi);
     });
-    // 予備席は番号の近い使用席と同じグループにする
-    for (const n of numbers) {
-      if (groupOf.has(n)) continue;
-      let best: number | undefined;
-      for (const u of usedSorted) if (best === undefined || Math.abs(u - n) < Math.abs(best - n)) best = u;
-      groupOf.set(n, best === undefined ? 0 : groupOf.get(best)!);
+  } else if (mode.kind === "size") {
+    // 島ごとに、使用席を席番号順（前列の左から）に並べて、指定の人数ずつ区切る
+    for (const island of findIslands(layout)) {
+      const seatsInIsland = island.filter((n) => used.has(n));
+      let i = 0;
+      for (const size of splitGroupSizes(seatsInIsland.length, mode.size, mode.alt)) {
+        for (let k = 0; k < size; k++) groupOf.set(seatsInIsland[i++], groupCount);
+        groupCount++;
+      }
     }
+  }
+
+  if (mode.kind === "count" || mode.kind === "size") {
+    if (!options.spareNoGroup) {
+      // 予備席は番号の近い使用席と同じグループにする
+      const usedSorted = numbers.filter((n) => used.has(n));
+      for (const n of numbers) {
+        if (groupOf.has(n)) continue;
+        let best: number | undefined;
+        for (const u of usedSorted) if (best === undefined || Math.abs(u - n) < Math.abs(best - n)) best = u;
+        if (best !== undefined && groupOf.has(best)) groupOf.set(n, groupOf.get(best)!);
+      }
+    }
+  } else if (options.spareNoGroup) {
+    for (const n of numbers) if (!used.has(n)) groupOf.delete(n);
   }
 
   return {
@@ -493,10 +582,11 @@ export function planLecture(
   enrolled: number,
   mode: GroupMode,
   fill: SeatFill = "even",
+  options: GroupOptions & { skipFrontRows?: number } = {},
 ): SeatPlan {
-  const used = chooseUsedSeats(layout, enrolled, fill);
+  const used = chooseUsedSeats(layout, enrolled, fill, options.skipFrontRows ?? 0);
   const numbers = layout.seats.map((s) => s.number).sort((a, b) => a - b);
-  const { groups, groupOf } = assignGroups(layout, used, mode);
+  const { groups, groupOf } = assignGroups(layout, used, mode, options);
   return {
     groups,
     seats: numbers.map((n) => ({

@@ -42,6 +42,9 @@ export function LectureSeatEditor({
   const [wholeIsland, setWholeIsland] = useState(false);
   const [regroupKind, setRegroupKind] = useState("island");
   const [regroupCount, setRegroupCount] = useState("6");
+  const [regroupSize, setRegroupSize] = useState("4");
+  const [regroupAlt, setRegroupAlt] = useState("3");
+  const [regroupSpareNoGroup, setRegroupSpareNoGroup] = useState(true);
   const [message, setMessage] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -162,9 +165,16 @@ export function LectureSeatEditor({
             <div className="stack" style={{ alignItems: "center", marginTop: 8 }}>
               <select className="input input--select-small" value={regroupKind} onChange={(e) => setRegroupKind(e.target.value)} aria-label="作り直し方">
                 <option value="island">島ごとに 1 グループ</option>
+                <option value="size">◯人ひと組</option>
                 <option value="count">席番号順に N グループ</option>
                 <option value="none">グループなし</option>
               </select>
+              {regroupKind === "size" ? (
+                <span className="small">
+                  <input className="input input--tiny" type="number" min={1} max={50} value={regroupSize} onChange={(e) => setRegroupSize(e.target.value)} aria-label="1 グループの人数" /> 人ひと組（割り切れないときは{" "}
+                  <input className="input input--tiny" type="number" min={1} max={50} value={regroupAlt} onChange={(e) => setRegroupAlt(e.target.value)} aria-label="もう 1 つの人数" /> 人ひと組も）
+                </span>
+              ) : null}
               {regroupKind === "count" ? (
                 <label className="small">
                   <input className="input input--tiny" type="number" min={1} max={50} value={regroupCount} onChange={(e) => setRegroupCount(e.target.value)} aria-label="グループ数" /> グループ
@@ -173,12 +183,25 @@ export function LectureSeatEditor({
               <button type="button" className="button button--secondary button--small"
                 onClick={() => {
                   if (window.confirm("今のグループをすべて消して作り直します。よろしいですか？（使用席・予備席はそのままです）")) {
-                    run(() => regroupAction(lectureId, regroupKind, Number(regroupCount)), "グループを作り直しました。");
+                    run(
+                      () => regroupAction(lectureId, {
+                        kind: regroupKind,
+                        count: regroupCount,
+                        size: regroupSize,
+                        alt: regroupAlt,
+                        spareNoGroup: regroupSpareNoGroup,
+                      }),
+                      "グループを作り直しました。",
+                    );
                   }
                 }}>
                 作り直す
               </button>
             </div>
+            <label className="small checkbox-inline" style={{ marginTop: 6 }}>
+              <input type="checkbox" checked={regroupSpareNoGroup} onChange={(e) => setRegroupSpareNoGroup(e.target.checked)} />
+              予備席（使わない席）はグループなしにする
+            </label>
           </details>
         </div>
       ) : null}

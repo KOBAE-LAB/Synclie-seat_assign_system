@@ -13,6 +13,8 @@ import {
   parseLayout,
   planLecture,
   renumberSeats,
+  seatRowsFromFront,
+  splitGroupSizes,
   spreadIndexes,
   validateLayout,
   withSeats,
@@ -531,4 +533,49 @@ test("使用席の選び方：前から詰める", () => {
   })!;
   const seats = getLecture(db, teacherId, id)!.seats.filter((s) => s.status === "used").map((s) => s.number).sort((a, b) => a - b);
   assert.deepEqual(seats, front.sort((a, b) => a - b));
+});
+
+test("◯人ひと組（または◯人ひと組）の分け方", () => {
+  assert.deepEqual(splitGroupSizes(14, 4, 3), [4, 4, 3, 3]);
+  assert.deepEqual(splitGroupSizes(12, 4, 3), [4, 4, 4]);
+  assert.deepEqual(splitGroupSizes(50, 4, 3).filter((n) => n === 4).length, 11);
+  assert.deepEqual(splitGroupSizes(50, 4, 3).filter((n) => n === 3).length, 2);
+  assert.deepEqual(splitGroupSizes(10, 4), [4, 4, 2], "割り切れなければ最後に少ない組");
+  assert.deepEqual(splitGroupSizes(5, 4, 3), [4, 1], "どうしても割り切れないとき");
+  assert.deepEqual(splitGroupSizes(0, 4, 3), []);
+});
+
+test("50 人・1 列目は使わない・前から詰める・4 人か 3 人ひと組・予備席はグループなし", () => {
+  // 長机（2 人）を 4 島 × 10 列（80 席）。島の間は通路
+  const room = emptyLayout(1000, 1300);
+  const desks = [0, 1, 2, 3].flatMap((c) =>
+    arrangeDesks({ type: "long2", rows: 10, cols: 1, pitchX: 150, pitchY: 100, startX: 150 + c * 200, startY: 130 }, 1, `c${c}-`),
+  );
+  const layout80 = renumberSeats(withSeats({ ...room, desks }));
+  assert.equal(layout80.seats.length, 80);
+  assert.equal(findIslands(layout80).length, 4);
+  const rows = seatRowsFromFront(layout80);
+  assert.deepEqual(rows[0], [1, 2, 3, 4, 5, 6, 7, 8]);
+
+  const plan = planLecture(layout80, 50, { kind: "size", size: 4, alt: 3 }, "front", { skipFrontRows: 1, spareNoGroup: true });
+  const used = plan.seats.filter((s) => s.status === "used").map((s) => s.number);
+  assert.equal(used.length, 50);
+  assert.ok(rows[0].every((n) => !used.includes(n)), "1 列目は使わない");
+  const sizes = plan.groups.map((_, gi) => plan.seats.filter((s) => s.groupIndex === gi).length);
+  assert.equal(sizes.filter((n) => n === 4).length, 11, "4 人グループ 11");
+  assert.equal(sizes.filter((n) => n === 3).length, 2, "3 人グループ 2");
+  assert.ok(plan.seats.filter((s) => s.status === "spare").every((s) => s.groupIndex === null), "予備席はグループなし");
+  // 最初のグループは左の島の 2・3 列目（9, 10, 17, 18）
+  assert.deepEqual(plan.seats.filter((s) => s.groupIndex === 0).map((s) => s.number), [9, 10, 17, 18]);
+
+  // 使用席が足りなければ、使わない列からも足す
+  const all = chooseUsedSeats(layout80, 78, "front", 1);
+  assert.equal(all.size, 78);
+  // 予備席にもグループを付ける設定（従来どおり）
+  const withSpare = planLecture(layout80, 50, { kind: "size", size: 4, alt: 3 }, "front", { skipFrontRows: 1 });
+  assert.ok(withSpare.seats.every((s) => s.groupIndex !== null));
+  // 島ごと＋予備席はグループなし
+  const island = planLecture(layout80, 50, { kind: "island" }, "front", { spareNoGroup: true });
+  assert.ok(island.seats.filter((s) => s.status === "spare").every((s) => s.groupIndex === null));
+  assert.ok(island.seats.filter((s) => s.status === "used").every((s) => s.groupIndex !== null));
 });

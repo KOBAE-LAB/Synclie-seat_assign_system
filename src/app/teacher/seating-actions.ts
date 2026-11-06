@@ -99,15 +99,13 @@ export async function createLectureAction(_prev: ActionState, formData: FormData
   if (messageJa.length > MESSAGE_MAX) return { error: `メッセージは ${MESSAGE_MAX} 文字以内にしてください。` };
 
   const seatFill = field(formData, "seatFill") === "front" ? "front" : "even";
-  let groupMode: GroupMode = { kind: "none" };
-  const mode = field(formData, "groupMode");
-  if (mode === "island") groupMode = { kind: "island" };
-  if (mode === "count") {
-    const count = Number(field(formData, "groupCount"));
-    if (!Number.isInteger(count) || count < 1 || count > 50) {
-      return { error: "グループ数は 1〜50 の整数で入力してください。" };
-    }
-    groupMode = { kind: "count", count };
+  const parsed = parseGroupMode(field(formData, "groupMode"), field(formData, "groupCount"), field(formData, "groupSize"), field(formData, "groupAlt"));
+  if ("error" in parsed) return { error: parsed.error };
+  const groupMode = parsed.mode;
+  const spareNoGroup = formData.get("spareNoGroup") === "on";
+  const skipFrontRows = Number(field(formData, "skipFrontRows") || "0");
+  if (!Number.isInteger(skipFrontRows) || skipFrontRows < 0 || skipFrontRows > 30) {
+    return { error: "使わない列の数は 0〜30 の整数で入力してください。" };
   }
 
   const id = createLecture(getDb(), teacher.teacherId, {
@@ -121,6 +119,8 @@ export async function createLectureAction(_prev: ActionState, formData: FormData
     messageEn: messageJa ? ((await translateToEnglish(messageJa)) ?? "") : "",
     groupMode,
     seatFill,
+    skipFrontRows,
+    spareNoGroup,
   });
   if (!id) return { error: "教室が見つからないか、席がありません。" };
   redirect(`/teacher/lectures/${id}`);
@@ -306,14 +306,35 @@ export async function assignSeatGroupAction(lectureId: number, seatNumbers: numb
   return changed ? {} : { error: "変更できませんでした。" };
 }
 
-export async function regroupAction(lectureId: number, kind: string, count: number): Promise<ActionState> {
+/** グループの分け方の入力を解釈する（講義作成・作り直しで共通） */
+function parseGroupMode(kind: string, count: string, size: string, alt: string): { mode: GroupMode } | { error: string } {
+  if (kind === "island") return { mode: { kind: "island" } };
+  if (kind === "count") {
+    const n = Number(count);
+    if (!Number.isInteger(n) || n < 1 || n > 50) return { error: "グループ数は 1〜50 の整数で入力してください。" };
+    return { mode: { kind: "count", count: n } };
+  }
+  if (kind === "size") {
+    const a = Number(size);
+    const b = alt.trim() ? Number(alt) : null;
+    if (!Number.isInteger(a) || a < 1 || a > 50) return { error: "1 グループの人数は 1〜50 の整数で入力してください。" };
+    if (b !== null && (!Number.isInteger(b) || b < 1 || b > 50)) {
+      return { error: "もう 1 つの人数は 1〜50 の整数で入力するか、空にしてください。" };
+    }
+    return { mode: { kind: "size", size: a, alt: b } };
+  }
+  return { mode: { kind: "none" } };
+}
+
+export async function regroupAction(
+  lectureId: number,
+  input: { kind: string; count: string; size: string; alt: string; spareNoGroup: boolean },
+): Promise<ActionState> {
   const owned = await ownedLecture(lectureId);
   if (!owned) return { error: BAD_ORIGIN };
-  let mode: GroupMode;
-  if (kind === "island") mode = { kind: "island" };
-  else if (kind === "none") mode = { kind: "none" };
-  else if (kind === "count" && Number.isInteger(count) && count >= 1 && count <= 50) mode = { kind: "count", count };
-  else return { error: "グループ数は 1〜50 の整数で入力してください。" };
-  const r = regroupLecture(getDb(), owned.teacher.teacherId, lectureId, mode);
+  if (!input || typeof input !== "object") return { error: "入力が正しくありません。" };
+  const parsed = parseGroupMode(String(input.kind), String(input.count), String(input.size), String(input.alt ?? ""));
+  if ("error" in parsed) return { error: parsed.error };
+  const r = regroupLecture(getDb(), owned.teacher.teacherId, lectureId, parsed.mode, { spareNoGroup: input.spareNoGroup === true });
   return r.ok ? {} : { error: r.error };
 }
