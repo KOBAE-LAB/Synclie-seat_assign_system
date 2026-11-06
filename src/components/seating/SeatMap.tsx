@@ -1,6 +1,6 @@
 import { DESK_SPECS, deskBox, SEAT_RADIUS, type Desk } from "@/lib/seating/geometry";
 import { groupOutlines } from "@/lib/seating/group-outline";
-import type { ClassroomLayout } from "@/lib/seating/layout";
+import { frontDistance, type ClassroomLayout } from "@/lib/seating/layout";
 import { contentViewBox, DeskBody, DeskFront, FixtureShape } from "./Shapes";
 
 export type SeatView = {
@@ -54,13 +54,21 @@ export function SeatMap({
     const [k] = keys;
     if (keys.size === 1 && k) desksByGroup.set(k, [...(desksByGroup.get(k) ?? []), d]);
   }
-  // 札は、机も含めた囲みの左上に置く
+  // グループ名は、グループのいちばん前（黒板側）の机の上に出す。自分の机がないグループは囲みの左上に
+  const dist = frontDistance(layout);
+  const labelDesk = new Map<string, Desk>();
   for (const g of outlines) {
-    for (const d of desksByGroup.get(g.key) ?? []) {
-      const b = deskBox(d);
-      g.badge = { x: Math.min(g.badge.x, b.minX), y: Math.min(g.badge.y, b.minY) };
+    const own = desksByGroup.get(g.key) ?? [];
+    if (own.length) {
+      labelDesk.set(g.key, [...own].sort((a, b) => dist(a) - dist(b) || a.x - b.x)[0]);
+    } else {
+      for (const d of own) {
+        const b = deskBox(d);
+        g.badge = { x: Math.min(g.badge.x, b.minX), y: Math.min(g.badge.y, b.minY) };
+      }
     }
   }
+  const labeledDeskIds = new Set([...labelDesk.values()].map((d) => d.id));
   return (
     <div className={`seat-map seat-map--${size}`}>
       <svg viewBox={contentViewBox(layout)} className="seat-map__svg" role="img" aria-label="座席図">
@@ -116,7 +124,8 @@ export function SeatMap({
         {layout.desks.map((d) => (
           <g key={d.id}>
             <DeskBody desk={d} />
-            <DeskFront desk={d} />
+            {/* 名前を出す机は、向きの ▲ を名前で隠さないよう出さない */}
+            {labeledDeskIds.has(d.id) ? null : <DeskFront desk={d} />}
           </g>
         ))}
         {layout.seats.map((seat) => {
@@ -161,9 +170,28 @@ export function SeatMap({
           );
         })}
         {outlines.map((g) => {
+          const opacity = mineKey && g.key !== mineKey ? 0.45 : 1;
+          const desk = labelDesk.get(g.key);
+          if (desk) {
+            // 机の上の中央に、机に収まる大きさで（文字は回さずまっすぐ）
+            const b = deskBox(desk);
+            const deskW = b.maxX - b.minX;
+            const deskH = b.maxY - b.minY;
+            const o = DESK_SPECS[desk.type].outline(desk);
+            const bodyH = o.kind === "rect" ? Math.min(o.h, deskH) : o.kind === "circle" ? o.r * 1.4 : 40;
+            const h = Math.max(22, Math.min(34, bodyH - 4));
+            const font = Math.round(h * 0.78);
+            const w = Math.min(Math.max(h * 1.4, g.name.length * font * 0.95 + 14), deskW - 6);
+            return (
+              <g key={`b-${g.key}`} className="group-badge group-badge--desk" opacity={opacity} aria-hidden="true">
+                <rect x={desk.x - w / 2} y={desk.y - h / 2} width={w} height={h} rx={6} fill={g.color} />
+                <text x={desk.x} y={desk.y + font * 0.36} textAnchor="middle" style={{ fontSize: font }}>{g.name}</text>
+              </g>
+            );
+          }
           const w = Math.max(34, g.name.length * 19 + 16);
           return (
-            <g key={`b-${g.key}`} className="group-badge" opacity={mineKey && g.key !== mineKey ? 0.45 : 1} aria-hidden="true">
+            <g key={`b-${g.key}`} className="group-badge" opacity={opacity} aria-hidden="true">
               <rect x={g.badge.x - 6} y={g.badge.y - 24} width={w} height={30} rx={6} fill={g.color} />
               <text x={g.badge.x - 6 + w / 2} y={g.badge.y - 2} textAnchor="middle">{g.name}</text>
             </g>
