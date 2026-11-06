@@ -16,7 +16,19 @@ import {
 } from "../src/lib/seating/layout.ts";
 import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, type Desk } from "../src/lib/seating/geometry.ts";
 import { saveClassroom, deleteClassroom, listClassrooms } from "../src/lib/seating/classrooms.ts";
-import { createLecture, getLecture, getLectureByToken, setAcceptState, toggleSeatStatus } from "../src/lib/seating/lectures.ts";
+import {
+  createLecture,
+  formatTtCode,
+  getLecture,
+  getLectureByToken,
+  getLectureByTtCode,
+  getTtCode,
+  issueTtCode,
+  normalizeTtCode,
+  revokeTtCode,
+  setAcceptState,
+  toggleSeatStatus,
+} from "../src/lib/seating/lectures.ts";
 import { cancelDraw, drawForDevice, listDraws, moveDraw, proxyDraw, resetDraws } from "../src/lib/seating/draws.ts";
 
 /** 旧形式（マス目）の JSON：cols 列のうち 4 列目ごとが通路 */
@@ -288,4 +300,20 @@ test("使用席・予備席の切り替えは抽選の優先順に反映され�
   setAcceptState(db, teacherId, lectureId, "open");
   const r = drawForDevice(db, token, uuid(1));
   assert.ok(r.ok && r.seatNumber === spare, "使用席にした席から割り当てる");
+});
+
+test("TT・参観コード：発行・照合・再発行・無効化", () => {
+  const { lectureId } = makeLecture(10);
+  assert.equal(getTtCode(db, teacherId, lectureId), null);
+  const code = issueTtCode(db, teacherId, lectureId)!;
+  assert.match(code, /^[A-Z2-9]{8}$/);
+  assert.equal(normalizeTtCode(formatTtCode(code).toLowerCase()), code, "小文字・ハイフン付きでも照合できる");
+  assert.equal(normalizeTtCode("abc"), null);
+  assert.equal(getLectureByTtCode(db, code)!.id, lectureId);
+  assert.equal(issueTtCode(db, teacherId + 1, lectureId), null, "他の講師は発行できない");
+  const next = issueTtCode(db, teacherId, lectureId)!;
+  assert.notEqual(next, code);
+  assert.equal(getLectureByTtCode(db, code), null, "再発行すると前のコードは使えない");
+  assert.ok(revokeTtCode(db, teacherId, lectureId));
+  assert.equal(getLectureByTtCode(db, next), null);
 });

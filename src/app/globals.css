@@ -884,3 +884,15 @@ rt {
   line-height: 2.2;
   margin: var(--space-2) 0 0;
 }
+
+.tt-code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  display: inline-block;
+  padding: var(--space-2) var(--space-4);
+  border: 2px dashed var(--brand);
+  background: var(--canvas);
+  user-select: all;
+}
