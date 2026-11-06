@@ -18,10 +18,16 @@ export function SeatMap({
   layout,
   seats,
   size = "normal",
+  takenStyle = "tint",
+  onSeatClick,
 }: {
   layout: ClassroomLayout;
   seats: SeatView[];
-  size?: "normal" | "small";
+  size?: "normal" | "small" | "screen";
+  /** 抽選済みの席の見せ方：tint＝薄く塗る（講師画面）、grey＝グレーアウト（投影用） */
+  takenStyle?: "tint" | "grey";
+  /** 指定すると席を押せるようになる（クライアントコンポーネントからのみ） */
+  onSeatClick?: (seatNumber: number) => void;
 }) {
   const byNumber = new Map(seats.map((s) => [s.number, s]));
   const hasMine = seats.some((s) => s.mine);
@@ -40,12 +46,29 @@ export function SeatMap({
         {layout.seats.map((seat) => {
           const v = byNumber.get(seat.number);
           const classes = ["seat-dot"];
-          if (v?.taken) classes.push("seat-dot--taken");
+          if (v?.taken) classes.push(takenStyle === "grey" ? "seat-dot--grey" : "seat-dot--taken");
+          if (onSeatClick) classes.push("seat-dot--clickable");
           if (v?.spare) classes.push("seat-dot--spare");
           if (v?.mine) classes.push("seat-dot--mine");
           if (hasMine && !v?.mine) classes.push("seat-dot--dim");
           return (
-            <g key={seat.number} className={classes.join(" ")}>
+            <g
+              key={seat.number}
+              className={classes.join(" ")}
+              onClick={onSeatClick ? () => onSeatClick(seat.number) : undefined}
+              role={onSeatClick ? "button" : undefined}
+              tabIndex={onSeatClick ? 0 : undefined}
+              onKeyDown={
+                onSeatClick
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSeatClick(seat.number);
+                      }
+                    }
+                  : undefined
+              }
+            >
               <title>{v?.label ? `${seat.number}番（${v.label}）` : `${seat.number}番`}</title>
               <circle
                 cx={seat.x}

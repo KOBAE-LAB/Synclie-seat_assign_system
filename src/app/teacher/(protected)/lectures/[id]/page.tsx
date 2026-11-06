@@ -4,10 +4,11 @@ import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { AutoRefresh } from "@/components/seating/AutoRefresh";
 import { ConfirmButton } from "@/components/seating/ConfirmButton";
-import { SeatMap } from "@/components/seating/SeatMap";
+import { SeatStatusEditor } from "@/components/seating/SeatStatusEditor";
 import {
   cancelDrawAction,
   deleteLectureAction,
+  moveDrawAction,
   proxyDrawAction,
   resetDrawsAction,
   setAcceptStateAction,
@@ -25,7 +26,7 @@ export default async function LecturePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ proxy?: string; group?: string; error?: string }>;
+  searchParams: Promise<{ proxy?: string; group?: string; error?: string; moved?: string; to?: string }>;
 }) {
   const teacher = await requireTeacher();
   const { id } = await params;
@@ -96,7 +97,8 @@ export default async function LecturePage({
       <section className="card">
         <h2>座席図</h2>
         <p className="small muted">丸の色＝グループ、点線の丸＝予備席、塗りつぶし＝抽選済み、▲＝机の向き（5 秒ごとに自動更新）</p>
-        <SeatMap
+        <SeatStatusEditor
+          lectureId={lecture.id}
           layout={lecture.layout}
           seats={lecture.seats.map((s) => ({
             number: s.number,
@@ -117,12 +119,17 @@ export default async function LecturePage({
 
       <section className="card">
         <h2>抽選結果（{draws.length} 件）</h2>
+        {query.moved ? (
+          <p className="notice" role="status">
+            {query.moved === "swapped" ? `${query.to}番の人と席を入れ替えました。` : `${query.to}番へ移動しました。`}
+          </p>
+        ) : null}
         {draws.length === 0 ? (
           <p className="muted">まだ抽選はありません。</p>
         ) : (
           <table className="table">
             <thead>
-              <tr><th>席</th><th>グループ</th><th>方法</th><th>時刻</th><th></th></tr>
+              <tr><th>席</th><th>グループ</th><th>方法</th><th>時刻</th><th>席の移動・入れ替え</th><th></th></tr>
             </thead>
             <tbody>
               {draws.map((d) => (
@@ -131,6 +138,21 @@ export default async function LecturePage({
                   <td>{d.groupName ?? "—"}</td>
                   <td>{d.drawnBy === "proxy" ? "代理" : `端末 ${d.deviceTag}`}</td>
                   <td>{new Date(d.createdAt).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}</td>
+                  <td>
+                    <form action={moveDrawAction.bind(null, lecture.id, d.id)} className="move-form">
+                      <select name="target" className="input input--select-small" defaultValue="" required aria-label={`${d.seatNumber}番の移動先`}>
+                        <option value="" disabled>移動先</option>
+                        {lecture.seats
+                          .filter((s) => s.number !== d.seatNumber)
+                          .map((s) => (
+                            <option key={s.number} value={s.number}>
+                              {s.number}番{takenNumbers.has(s.number) ? "（入れ替え）" : s.status === "spare" ? "（予備）" : ""}
+                            </option>
+                          ))}
+                      </select>
+                      <button type="submit" className="button button--secondary button--small">移動</button>
+                    </form>
+                  </td>
                   <td>
                     <form action={cancelDrawAction.bind(null, lecture.id, d.id)}>
                       <ConfirmButton message={`${d.seatNumber}番の抽選を取り消しますか？（その端末はもう一度抽選できるようになります）`} className="button button--secondary button--small">

@@ -197,3 +197,17 @@ export function setAcceptState(db: Db, teacherId: number, id: number, state: Acc
 export function deleteLecture(db: Db, teacherId: number, id: number): boolean {
   return db.prepare("DELETE FROM lectures WHERE id = ? AND owner_teacher_id = ?").run(id, teacherId).changes > 0;
 }
+
+/** 講義の席を「使用」⇔「予備」に切り替える。切り替え後の状態を返す（見つからなければ null） */
+export function toggleSeatStatus(db: Db, teacherId: number, lectureId: number, seatNumber: number): "used" | "spare" | null {
+  const row = db
+    .prepare(
+      `SELECT s.id, s.status FROM lecture_seats s JOIN lectures l ON l.id = s.lecture_id
+        WHERE s.lecture_id = ? AND s.seat_number = ? AND l.owner_teacher_id = ?`,
+    )
+    .get(lectureId, seatNumber, teacherId) as { id: number; status: "used" | "spare" } | undefined;
+  if (!row) return null;
+  const next = row.status === "used" ? "spare" : "used";
+  db.prepare("UPDATE lecture_seats SET status = ? WHERE id = ?").run(next, row.id);
+  return next;
+}

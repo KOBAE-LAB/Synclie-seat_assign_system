@@ -12,9 +12,10 @@ import {
   getLecture,
   MESSAGE_MAX,
   setAcceptState,
+  toggleSeatStatus,
   type AcceptState,
 } from "@/lib/seating/lectures";
-import { cancelDraw, proxyDraw, resetDraws } from "@/lib/seating/draws";
+import { cancelDraw, moveDraw, proxyDraw, resetDraws } from "@/lib/seating/draws";
 
 export type ActionState = { error?: string };
 
@@ -132,4 +133,20 @@ export async function deleteLectureAction(lectureId: number): Promise<void> {
   const owned = await ownedLecture(lectureId);
   if (owned) deleteLecture(getDb(), owned.teacher.teacherId, lectureId);
   redirect("/teacher");
+}
+
+export async function moveDrawAction(lectureId: number, drawId: number, formData: FormData): Promise<void> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned) redirect("/teacher");
+  const target = Number(field(formData, "target"));
+  const result = Number.isInteger(target) ? moveDraw(getDb(), lectureId, drawId, target) : "not_found";
+  const q = result === "moved" || result === "swapped" ? `?moved=${result}&to=${target}` : "";
+  redirect(`/teacher/lectures/${lectureId}${q}`);
+}
+
+/** 使用席 ⇔ 予備席の切り替え（クライアントから呼ぶ。画面は呼び出し側で更新する） */
+export async function toggleSeatStatusAction(lectureId: number, seatNumber: number): Promise<"used" | "spare" | null> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned || !Number.isInteger(seatNumber)) return null;
+  return toggleSeatStatus(getDb(), owned.teacher.teacherId, lectureId, seatNumber);
 }
