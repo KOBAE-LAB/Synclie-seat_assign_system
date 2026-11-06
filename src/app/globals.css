@@ -1,0 +1,189 @@
+/* Synclie デザイントークン */
+:root {
+  --brand: #800b16;
+  --brand-strong: #5e0810;
+  --brand-tint: #fbedef;
+  --canvas: #f5f3f2;
+  --surface: #ffffff;
+  --ink: #1f1f1f;
+  --ink-2: #4f4f4f;
+  --line: #8c8c8c;
+  --line-soft: #ddd7d5;
+  --ok: #0041c2;
+  --header-bg: #000000;
+  --header-ink: #ffffff;
+
+  --radius: 0; /* 角は四角 */
+  --card-top-border: 4px solid var(--brand);
+  --font-sans: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "BIZ UDPGothic", "BIZ UDGothic",
+    Meiryo, system-ui, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --content-width: 960px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-radius: var(--radius);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+a {
+  color: var(--ok);
+}
+
+:focus-visible {
+  outline: 3px solid var(--ok);
+  outline-offset: 2px;
+}
+
+/* ヘッダー（黒） */
+.site-header {
+  background: var(--header-bg);
+  color: var(--header-ink);
+}
+.site-header__inner {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.site-header__title {
+  color: var(--header-ink);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+.site-header__title span {
+  color: #ffffff;
+  border-bottom: 3px solid var(--brand);
+}
+.site-header__nav a {
+  color: var(--header-ink);
+  font-size: 14px;
+}
+
+.page {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+/* カード（上辺にえんじ色の線） */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-top: var(--card-top-border);
+  padding: var(--space-5);
+}
+.card + .card {
+  margin-top: var(--space-5);
+}
+.card h1,
+.card h2 {
+  margin-top: 0;
+  line-height: 1.4;
+}
+
+.muted {
+  color: var(--ink-2);
+}
+
+.notice {
+  background: var(--brand-tint);
+  border-left: 4px solid var(--brand);
+  padding: var(--space-3) var(--space-4);
+  color: var(--ink);
+}
+
+/* フォーム */
+.field {
+  display: block;
+  margin-bottom: var(--space-4);
+}
+.field__label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: var(--space-1);
+}
+.field__hint {
+  display: block;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.input {
+  width: 100%;
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* ボタン */
+.button {
+  display: inline-block;
+  font: inherit;
+  font-weight: 700;
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: #ffffff;
+  text-decoration: none;
+  cursor: pointer;
+}
+.button:hover {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+.button:disabled {
+  background: var(--line-soft);
+  border-color: var(--line-soft);
+  color: var(--ink-2);
+  cursor: not-allowed;
+}
+.button--secondary {
+  background: var(--surface);
+  color: var(--brand);
+}
+.button--secondary:hover {
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+}
+
+.stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.site-footer {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+  font-size: 13px;
+  color: var(--ink-2);
+}

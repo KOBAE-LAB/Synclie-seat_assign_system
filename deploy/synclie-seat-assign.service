@@ -1,0 +1,30 @@
+# /etc/systemd/system/synclie-seat-assign.service
+# Synclie 座席抽選（Next.js / 127.0.0.1:3008）
+[Unit]
+Description=Synclie seat-assign (Next.js on 127.0.0.1:3008)
+After=network.target
+
+[Service]
+Type=simple
+User=synclie
+Group=synclie
+WorkingDirectory=/opt/synclie-seat-assign
+Environment=NODE_ENV=production
+# SEAT_ASSIGN_DB_PATH / SESSION_SECRET / OPENAI_API_KEY を記載（権限 600, root 所有）
+EnvironmentFile=/etc/synclie-seat-assign.env
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3008
+Restart=on-failure
+RestartSec=5
+
+# DB 置き場 /var/lib/synclie-seat-assign を自動作成（所有者は User）
+StateDirectory=synclie-seat-assign
+StateDirectoryMode=0750
+
+# 最低限のハードニング
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

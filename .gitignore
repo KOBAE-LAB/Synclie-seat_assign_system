@@ -1,0 +1,21 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# 環境変数（.env.example のみコミット）
+.env
+.env.*
+!.env.example
+
+# SQLite データ
+data/
+*.db
+*.db-shm
+*.db-wal
+
+.DS_Store
+npm-debug.log*
