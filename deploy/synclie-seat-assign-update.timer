@@ -1,0 +1,12 @@
+# /etc/systemd/system/synclie-seat-assign-update.timer
+# 起動 2 分後から、前回の実行開始から 5 分ごとに自動更新を実行する。
+[Unit]
+Description=Synclie seat-assign auto update every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,5 +1,6 @@
 # /etc/systemd/system/synclie-seat-assign.service
 # Synclie 座席抽選（Next.js / 127.0.0.1:3008）
+# current は releases/<sha> へのシンボリックリンク（deploy/auto-update.sh が切り替える）
 [Unit]
 Description=Synclie seat-assign (Next.js on 127.0.0.1:3008)
 After=network.target
@@ -8,7 +9,7 @@ After=network.target
 Type=simple
 User=synclie
 Group=synclie
-WorkingDirectory=/opt/synclie-seat-assign
+WorkingDirectory=/opt/synclie-seat-assign/current
 Environment=NODE_ENV=production
 # SEAT_ASSIGN_DB_PATH / SESSION_SECRET / OPENAI_API_KEY を記載（権限 600, root 所有）
 EnvironmentFile=/etc/synclie-seat-assign.env

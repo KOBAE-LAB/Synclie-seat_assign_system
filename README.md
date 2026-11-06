@@ -58,7 +58,8 @@ src/app/                 画面と API（App Router）
   api/health/            死活監視（DB スキーマのバージョンを返す）
 src/lib/db/              SQLite 接続とマイグレーション
 tests/                   テスト
-deploy/                  systemd ユニット・nginx 設定のサンプル
+deploy/                  systemd ユニット・nginx 設定・自動更新スクリプト
+.github/workflows/ci.yml  CI（lint / 型チェック / テスト / ビルド）
 ```
 
 ## データベース
@@ -99,16 +100,28 @@ sudo useradd --system --create-home --shell /usr/sbin/nologin synclie   # 既存
 
 （`build-essential` / `python3` は better-sqlite3 のビルド済みバイナリが使えない場合の保険です）
 
-### 2. 配置とビルド
+### 2. 配置（リリース方式）
+
+サーバー上は次の構成で、`current` が今動いているリリースを指します
+（詳しくは「[自動デプロイ](#自動デプロイ-ci--サーバー側の自動更新)」）。
+
+```
+/opt/synclie-seat-assign/
+  repo.git/          GitHub の bare クローン（fetch 専用）
+  releases/<sha>/    コミットごとのビルド済みディレクトリ（最新 3 つ）
+  current            → releases/<sha> へのシンボリックリンク
+  state/             失敗したコミットの記録
+```
 
 ```bash
-sudo mkdir -p /opt/synclie-seat-assign
-sudo chown synclie:synclie /opt/synclie-seat-assign
-sudo -u synclie git clone https://github.com/KOBAE-LAB/Synclie-seat_assign_system.git /opt/synclie-seat-assign
-cd /opt/synclie-seat-assign
-sudo -u synclie npm ci
-sudo -u synclie npm run build
+cd /tmp
+D=/opt/synclie-seat-assign
+sudo install -d -o synclie -g synclie $D $D/releases $D/state
+U=https://github.com/KOBAE-LAB/Synclie-seat_assign_system.git
+sudo -u synclie git clone --bare $U $D/repo.git
 ```
+
+ビルドは手順 4 の自動更新が行います。
 
 ### 3. 環境変数ファイル
 
@@ -130,12 +143,23 @@ OPENAI_API_KEY=（実際のキー）
 ### 4. systemd
 
 ```bash
-sudo cp deploy/synclie-seat-assign.service /etc/systemd/system/
+D=/opt/synclie-seat-assign
+mkdir -p ~/ssa && cd ~/ssa
+sudo -u synclie git -C $D/repo.git archive main deploy | tar -x
+cd deploy
+sudo install -m 755 auto-update.sh /usr/local/sbin/synclie-seat-assign-update
+sudo install -m 644 -t /etc/systemd/system synclie-seat-assign.service
+sudo install -m 644 -t /etc/systemd/system synclie-seat-assign-update.service
+sudo install -m 644 -t /etc/systemd/system synclie-seat-assign-update.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now synclie-seat-assign
-systemctl status synclie-seat-assign
+sudo systemctl enable synclie-seat-assign
+sudo systemctl start synclie-seat-assign-update
 curl http://127.0.0.1:3008/api/health   # {"status":"ok",...}
+sudo systemctl enable --now synclie-seat-assign-update.timer
 ```
+
+`synclie-seat-assign-update` の初回実行で main の最新コミット（CI 成功済み）をビルドし、アプリを起動します。
+ビルドに数分かかり、その間コマンドは戻りません。
 
 ### 5. nginx
 
@@ -159,13 +183,8 @@ Certbot が 443 番の設定と HTTP→HTTPS リダイレクトを追記しま�
 
 ### 更新手順
 
-```bash
-cd /opt/synclie-seat-assign
-sudo -u synclie git pull
-sudo -u synclie npm ci
-sudo -u synclie npm run build
-sudo systemctl restart synclie-seat-assign
-```
+手動の更新は不要です。PR が main にマージされると、サーバーが 5 分以内に自分で取り込みます
+（次章「自動デプロイ」）。
 
 ### バックアップ
 
@@ -174,3 +193,231 @@ SQLite は WAL モードのため、コピーには `sqlite3` の `.backup` を�
 ```bash
 sudo sqlite3 /var/lib/synclie-seat-assign/seat-assign.db ".backup '/var/backups/seat-assign-$(date +%F).db'"
 ```
+
+## 自動デプロイ（CI + サーバー側の自動更新）
+
+全体の流れ:
+
+1. PR を作ると GitHub Actions の CI（ジョブ名 `ci`）が
+   `npm ci` → `npm run lint` → `npm run typecheck` → `npm test` → `npm run build` と
+   deploy スクリプトのテストを実行します（`.github/workflows/ci.yml`）。
+2. PR は自動マージ（squash）を有効にしておき、CI が通ると自動で main にマージされます。
+3. main へのマージ後のコミットでも CI が走ります。
+4. サーバーの `synclie-seat-assign-update.timer` が 5 分ごとに
+   `/usr/local/sbin/synclie-seat-assign-update`（= `deploy/auto-update.sh`）を実行します。
+   - GitHub から main を fetch し、新しいコミットがあれば
+   - そのコミットの CI が success か GitHub API
+     （`https://api.github.com/repos/KOBAE-LAB/Synclie-seat_assign_system/commits/<sha>/check-runs`）で確認
+     （公開リポジトリなのでトークン不要。API に届かない・CI 未完了ならその回は何もしない）
+   - `releases/<sha>` にソースを展開し、ユーザー `synclie` で `npm ci` と `npm run build`
+   - 両方成功したときだけ `current` を新リリースへ原子的に切り替え、`systemctl restart synclie-seat-assign`
+   - `http://127.0.0.1:3008/api/health` が ok を返さなければ直前のリリースへ戻して再起動
+   - リリースは最新 3 つを残して削除
+
+**ビルドが失敗しても `current` は切り替わらないので、動いているサイトは止まりません。**
+失敗したコミットは `state/failed-<sha>` に記録され、以後は再試行しません
+（次の修正コミットが main に入れば、そちらがデプロイされます）。
+処理は `flock` で排他しているので、ビルドが 5 分を超えても二重に走りません。
+ビルドは `Nice=10` で動かし、同じ VPS の他アプリ（3005 / 3006 / 3007 / 3095）への影響を抑えています。
+
+スクリプトの動作は `bash deploy/test-auto-update.sh` で（本番環境なしに）確認できます。CI でも毎回実行しています。
+
+### GitHub の初回設定（一度だけ・ブラウザで操作）
+
+1. **Settings → General → Pull Requests → 「Allow auto-merge」にチェック**
+   PR ごとに「CI が通ったら自動でマージする」を予約できるようになります
+   （`gh pr merge --auto --squash` や PR 画面の「Enable auto-merge」）。
+   同じ欄の「Allow squash merging」も有効にしておきます。
+   「Automatically delete head branches」も有効にすると、マージ後のブランチが自動で消えて便利です。
+2. **Settings → Rules → Rulesets → New ruleset → New branch ruleset**
+   （旧画面の Settings → Branches → Add branch protection rule でも同じことができます）
+   - Ruleset Name: `main`、Enforcement status: **Active**
+   - Target branches: **Add target → Include default branch**（= `main`）
+   - **Require a pull request before merging** にチェック（Required approvals は **0**）
+     main へ直接 push できなくなり、必ず PR 経由になります。
+     承認数を 1 以上にすると、自分で承認するまで自動マージが止まります。
+   - **Require status checks to pass** にチェックし、**Add checks** で `ci` を追加
+     CI が成功しない限りマージできなくなります。自動マージはこの条件が満たされた瞬間に実行されます。
+     （`ci` は一度でも CI が走ると候補に出ます。この PR で一度走っています）
+   - **Require branches to be up to date before merging**（任意）
+     main が先に進んでいたら、PR を最新の main に追従させてから再度 CI を通すことを求めます。
+     より安全ですが、PR が複数あると追従待ちで自動マージが止まりやすくなります。一人で運用するならオフで構いません。
+   - **Block force pushes** にチェック（main の履歴の書き換えを防ぎます）
+   - **Create** で保存
+
+### 既存サーバーの移行（一度だけ・シリアルコンソールで実行）
+
+現在のサーバーは `/opt/synclie-seat-assign` が通常の git クローンで、その場で `.next` をビルドして動いています。
+これをリリース方式に変換します。**DB（`/var/lib/synclie-seat-assign/`）と環境変数（`/etc/synclie-seat-assign.env`）には触れません。**
+アプリが止まるのは手順 4〜6 の 1 分程度です。この PR が main にマージされてから実行してください。
+
+**0. 作業場所と変数**（以降の手順は同じシェルで続けて実行します）
+
+```bash
+cd /tmp
+D=/opt/synclie-seat-assign
+U=https://github.com/KOBAE-LAB/Synclie-seat_assign_system.git
+```
+
+**1. 現状確認**（`{"status":"ok",...}` が返ること）
+
+```bash
+systemctl status synclie-seat-assign --no-pager
+curl -s http://127.0.0.1:3008/api/health; echo
+```
+
+**2. 念のためバックアップ**（DB と環境変数。移行では変更しませんが保険として）
+
+```bash
+sudo mkdir -p /var/backups
+DB=/var/lib/synclie-seat-assign/seat-assign.db
+sudo sqlite3 $DB ".backup '/var/backups/seat-assign-pre-release.db'"
+sudo cp -p /etc/synclie-seat-assign.env /root/synclie-seat-assign.env.bak
+```
+
+（`sqlite3` が無い場合は `sudo apt-get install -y sqlite3`）
+
+**3. 今動いているコミットを控える**（これが最初のリリース名になります）
+
+```bash
+SHA=$(sudo -u synclie git -C $D rev-parse HEAD)
+echo $SHA
+```
+
+**4. アプリを止めて、今のクローンを `releases/<SHA>` に移す**
+ビルド済みの `.next` と `node_modules` ごと移すので、再ビルドは不要です。
+
+```bash
+sudo systemctl stop synclie-seat-assign
+sudo mv $D /opt/ssa-old
+sudo install -d -o synclie -g synclie $D $D/releases $D/state
+sudo mv /opt/ssa-old $D/releases/$SHA
+sudo ln -sfn releases/$SHA $D/current
+ls -l $D
+```
+
+**5. fetch 用の bare クローンを作る**
+
+```bash
+sudo -u synclie git clone --bare $U $D/repo.git
+```
+
+**6. systemd ユニットと更新スクリプトを入れて、アプリを再開**
+ファイルは main から取り出します（`synclie-seat-assign.service` は `WorkingDirectory` が `current` に変わっています）。
+
+```bash
+mkdir -p ~/ssa && cd ~/ssa
+sudo -u synclie git -C $D/repo.git archive main deploy | tar -x
+cd deploy
+sudo install -m 755 auto-update.sh /usr/local/sbin/synclie-seat-assign-update
+sudo install -m 644 -t /etc/systemd/system synclie-seat-assign.service
+sudo install -m 644 -t /etc/systemd/system synclie-seat-assign-update.service
+sudo install -m 644 -t /etc/systemd/system synclie-seat-assign-update.timer
+sudo systemctl daemon-reload
+sudo systemctl start synclie-seat-assign
+curl -s http://127.0.0.1:3008/api/health; echo
+```
+
+ここで ok が返れば移行は完了です（中身は移行前と同じコミット）。
+
+**7. 自動更新を試す**
+`--dry-run` は fetch と CI 確認だけ行い、何をするかを表示します。
+
+```bash
+cd /tmp
+sudo /usr/local/sbin/synclie-seat-assign-update --dry-run
+```
+
+問題なければ 1 回実際に実行します（新しいコミットがあればビルドして切り替えます。数分かかります）。
+
+```bash
+sudo systemctl start --no-block synclie-seat-assign-update
+journalctl -fu synclie-seat-assign-update
+```
+
+`ヘルスチェック OK` か、何も出ずに終われば成功です（Ctrl+C で表示を抜けます）。
+
+**8. タイマーを有効にする**（起動 2 分後から 5 分ごと）
+
+```bash
+sudo systemctl enable --now synclie-seat-assign-update.timer
+systemctl list-timers 'synclie*' --no-pager
+```
+
+**9. 後片付け**
+
+```bash
+rm -rf ~/ssa
+```
+
+### ログの見方
+
+```bash
+journalctl -u synclie-seat-assign-update -n 50 --no-pager
+journalctl -fu synclie-seat-assign-update
+journalctl -u synclie-seat-assign -n 50 --no-pager
+```
+
+上 2 つが自動更新（直近 50 行 / 流しっぱなし）、3 つ目がアプリ本体のログです。
+変更がない回はログを出しません。
+
+今どのコミットが動いているか:
+
+```bash
+readlink /opt/synclie-seat-assign/current
+```
+
+### 手動ロールバック
+
+自動のロールバックはヘルスチェック失敗時だけです。画面の不具合などで戻したいときは手動で切り替えます。
+
+**1. 残っているリリースと現在のリリースを確認**（新しい順。最大 3 つ）
+
+```bash
+D=/opt/synclie-seat-assign
+ls -lt $D/releases
+readlink $D/current
+```
+
+**2. 今のコミットを「失敗」扱いにする**（しないと次の自動更新で再びデプロイされます）
+
+```bash
+BAD=$(basename $(readlink $D/current))
+sudo -u synclie touch $D/state/failed-$BAD
+```
+
+**3. 戻したいリリースへ切り替えて再起動**（`<sha>` は手順 1 の一覧から選ぶ）
+
+```bash
+sudo ln -sfn releases/<sha> $D/.current.new
+sudo mv -T $D/.current.new $D/current
+sudo systemctl restart synclie-seat-assign
+curl -s http://127.0.0.1:3008/api/health; echo
+```
+
+その後、GitHub で問題の PR を revert（PR 画面の「Revert」ボタン）すれば、
+revert のコミットが通常どおり自動デプロイされます。
+
+自動更新を一時的に止めたいとき / 再開するとき:
+
+```bash
+sudo systemctl stop synclie-seat-assign-update.timer
+sudo systemctl start synclie-seat-assign-update.timer
+```
+
+失敗扱いにしたコミットを再試行させたいときは `sudo rm $D/state/failed-<sha>`。
+
+### 自動更新スクリプト自体を更新するとき
+
+`/usr/local/sbin/synclie-seat-assign-update` と systemd ユニットは、壊れたコミットで更新の仕組みごと止まらないよう
+**自動では置き換えません**。`deploy/` 配下を変更した PR がデプロイされたら、次を実行します。
+
+```bash
+C=/opt/synclie-seat-assign/current/deploy
+sudo install -m 755 $C/auto-update.sh /usr/local/sbin/synclie-seat-assign-update
+sudo install -m 644 -t /etc/systemd/system $C/synclie-seat-assign-update.service
+sudo install -m 644 -t /etc/systemd/system $C/synclie-seat-assign-update.timer
+sudo systemctl daemon-reload
+```
+
+（`synclie-seat-assign.service` を変えたときは同様に入れて `sudo systemctl restart synclie-seat-assign`）
