@@ -13,6 +13,8 @@ import {
   rotationToFace,
   rotationToFaceWall,
   SEAT_RADIUS,
+  snapToWall,
+  WALL_FIXTURES,
   type Desk,
   type DeskType,
   type Fixture,
@@ -180,8 +182,16 @@ export function ClassroomEditor({
     const fixtureId = newId("f");
     update((r) => {
       const spec = FIXTURE_SPECS[type];
-      const pos = type === "board" ? { x: snap(r.width / 2), y: 20 } : placeAt(r);
-      return { ...r, fixtures: [...r.fixtures, { id: fixtureId, type, ...pos, w: spec.w, h: spec.h, rotation: 0 }] };
+      // 黒板は前の壁ぎわ、ドアは右の壁、窓は左の壁に沿わせて置く。そのほかは部屋の中ほど
+      const pos =
+        type === "board"
+          ? { x: snap(r.width / 2), y: 20, rotation: 0 }
+          : type === "door"
+            ? { x: r.width, y: snap(r.height * 0.8), rotation: 90 }
+            : type === "window"
+              ? { x: 0, y: snap(r.height / 2), rotation: 90 }
+              : { ...placeAt(r), rotation: 0 };
+      return { ...r, fixtures: [...r.fixtures, { id: fixtureId, type, ...pos, w: spec.w, h: spec.h }] };
     });
     selectOnly("fixture", fixtureId);
   }
@@ -437,6 +447,12 @@ export function ClassroomEditor({
     const dy = clamp(snap(p.y - drag.startY), -minY, room.height - maxY);
     if (!drag.moved && !dx && !dy) return;
     const at = new Map(drag.items.map((i) => [selKey(i.kind, i.id), i]));
+    // ドア・窓を 1 つだけ動かしているときは、壁の近くで壁の線に吸い付かせる（Alt を押すと吸い付かない）
+    let wall: { x: number; y: number; rotation: number } | null = null;
+    if (drag.items.length === 1 && drag.items[0].kind === "fixture" && !e.altKey) {
+      const f = room.fixtures.find((x) => x.id === drag.items[0].id);
+      if (f && WALL_FIXTURES.includes(f.type)) wall = snapToWall(drag.items[0].x + dx, drag.items[0].y + dy, room);
+    }
     const apply = (r: Room): Room => ({
       ...r,
       desks: r.desks.map((d) => {
@@ -445,7 +461,8 @@ export function ClassroomEditor({
       }),
       fixtures: r.fixtures.map((f) => {
         const s0 = at.get(selKey("fixture", f.id));
-        return s0 ? { ...f, x: s0.x + dx, y: s0.y + dy } : f;
+        if (!s0) return f;
+        return wall ? { ...f, ...wall } : { ...f, x: s0.x + dx, y: s0.y + dy };
       }),
     });
     // ドラッグ開始時に 1 回だけ履歴に積み、移動中は履歴を増やさない
@@ -683,7 +700,7 @@ export function ClassroomEditor({
           <svg
             ref={svgRef}
             className="editor__svg"
-            viewBox={`-20 -20 ${room.width + 40} ${room.height + 40}`}
+            viewBox={`-50 -30 ${room.width + 100} ${room.height + 80}`}
             tabIndex={0}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -738,6 +755,7 @@ export function ClassroomEditor({
           <p className="small muted">
             上が前（黒板側）です。机の小さな三角が机の向きです。押して選び、ドラッグで移動。
             <strong>複数選択</strong>：何もないところからドラッグで囲む、Shift・Ctrl/⌘ を押しながら押す、または「複数選択」をオン。選んだものはまとめて動かせます。
+            ドア・窓は壁の近くに動かすと壁に沿って吸い付きます（Alt を押しながらだと吸い付きません）。
             Ctrl/⌘+A＝すべて選択、矢印キー＝移動（Shift で大きく）、R＝回転、Delete＝削除、Ctrl/⌘+D＝複製、Ctrl/⌘+Z＝元に戻す、Esc＝選択を解除。
           </p>
         </div>
