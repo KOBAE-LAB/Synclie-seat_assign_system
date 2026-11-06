@@ -11,6 +11,7 @@ export default async function AccountPage() {
     <main className="page">
       <p><Link href="/teacher">← 講義一覧へ</Link></p>
       <section className="card auth-card">
+        <p className="eyebrow">ACCOUNT</p>
         <h1>アカウント設定</h1>
         <p className="muted">ログイン ID：{teacher.loginId}</p>
         <p className="small muted">最後のログインから 2 年たったアカウントは、教室・講義・抽選結果ごと自動で削除されます。</p>

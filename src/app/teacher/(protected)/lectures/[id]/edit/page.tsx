@@ -19,7 +19,8 @@ export default async function EditLecturePage({ params }: { params: Promise<{ id
   return (
     <main className="page">
       <p><Link href={`/teacher/lectures/${lecture.id}`}>← 講義に戻る</Link></p>
-      <section className="card">
+      <section className="card card--accent">
+        <p className="eyebrow">LECTURE SETTINGS</p>
         <h1>講義の設定</h1>
         <p className="small muted">学生の画面では「日本語／ふりがな／English」を切り替えて表示できます。座席・グループは講義の作成時に決まります。</p>
         <LectureInfoForm

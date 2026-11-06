@@ -51,9 +51,10 @@ export default async function LecturePage({
       <AutoRefresh />
       <p><Link href="/teacher">← 講義一覧へ</Link></p>
 
-      <section className="card">
+      <section className="card card--accent">
         <div className="card__head">
           <div>
+            <p className="eyebrow">LECTURE</p>
             <h1>{lecture.name}</h1>
             <p className="muted small">
               {lecture.lectureDate ?? "日付なし"}・{lecture.classroomName}・受講者 {lecture.enrolledCount} 人（使用席 {usedCount} / 全 {lecture.seats.length} 席）

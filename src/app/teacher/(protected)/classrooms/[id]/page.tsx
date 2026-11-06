@@ -29,7 +29,8 @@ export default async function EditClassroomPage({
   return (
     <main className="page page--wide">
       <p><Link href="/teacher">← 講義一覧へ</Link></p>
-      <section className="card">
+      <section className="card card--accent">
+        <p className="eyebrow">CLASSROOM</p>
         <h1>教室を編集：{classroom.name}</h1>
         {copied ? <p className="notice" role="status">共有コードから教室をコピーしました。必要に応じて名前や配置を直して保存してください。</p> : null}
         <p className="small muted">講義を作った後に教室を編集しても、作成済みの講義の座席図は変わりません。</p>

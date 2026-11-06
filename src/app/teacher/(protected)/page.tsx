@@ -30,8 +30,9 @@ export default async function TeacherHomePage({ searchParams }: { searchParams: 
 
   return (
     <main className="page">
-      <section className="card">
+      <section className="card card--accent">
         <div className="card__head">
+          <p className="eyebrow">TEACHER STUDIO</p>
           <h1>{filter.archived ? "アーカイブした講義" : "講義一覧"}</h1>
           {classrooms.length ? (
             <Link href="/teacher/lectures/new" className="button">＋ 講義を作る</Link>
@@ -59,10 +60,14 @@ export default async function TeacherHomePage({ searchParams }: { searchParams: 
         {sp.archived === "done" ? <p className="notice" role="status">講義をアーカイブしました。「アーカイブ」にチェックして絞り込むと見られます。</p> : null}
 
         {classrooms.length === 0 ? (
-          <p className="notice">
-            まず<Link href="/teacher/classrooms/new">教室を作って</Link>
-            ください。教室ができたら講義を作れます。
-          </p>
+          <div className="guide">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/good.png" alt="Techるくん" width={85} height={100} />
+            <p>
+              <strong>はじめに</strong>
+              まず<Link href="/teacher/classrooms/new">教室を作って</Link>、机と黒板を並べましょう。教室ができたら講義を作れます。
+            </p>
+          </div>
         ) : lectures.length === 0 ? (
           <p className="muted">{filtering ? "条件に合う講義はありません。" : "講義はまだありません。"}</p>
         ) : (

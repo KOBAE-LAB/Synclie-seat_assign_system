@@ -15,6 +15,7 @@ export default async function TeacherLoginPage({ searchParams }: { searchParams:
   return (
     <main className="page">
       <section className="card auth-card">
+        <p className="eyebrow">TEACHER STUDIO</p>
         <h1>講師ログイン</h1>
         {deleted ? <p className="notice" role="status">アカウントを削除しました。ご利用ありがとうございました。</p> : null}
         <LoginForm />

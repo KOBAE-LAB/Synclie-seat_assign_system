@@ -41,6 +41,18 @@
 
 学生は QR を読み取って「抽選」を押すだけです。画面右上で「日本語／ふりがな／English」を切り替えられます（選んだ言語は端末に保存）。ブラウザに保存した匿名の端末 ID で識別し、同じ端末では再抽選できません（再読み込みしても同じ席が表示されます）。
 
+## デザイン
+
+画面は「Synclie コンセプトデザイン・ノート」（`KOBAE-LAB/synclie-concept-design`）に合わせています。
+
+- 色：ブランド `#800b16`（ホバー `#590909`）、文字 `#232323`／`#676767`、背景 `#f4f4f4`、線 `#dedede`。トークンは `src/app/globals.css` の `:root`
+- 書体：Arial, Hiragino Kaku Gothic ProN, Noto Sans JP
+- ヘッダー：`#161616` に KOBAE LAB ロゴ ｜「Synclie - 座席・グループ抽選」｜右に講師Studio。フッターは「KOBAE LAB · Synclie」
+- カード：白・角丸 12px。主要なカードは上辺にえんじ色の太線（`.card--accent`）、英字の小見出し（`.eyebrow`）
+- ボタン：角丸 8px。主ボタンはえんじ、副ボタンは白地に灰色の枠
+- ガイドキャラクター「Techるくん」（`.guide`）：トップ・講義一覧・学生画面などに表示
+- 画像：`public/brand/`（`logo-dark.png` は公式ロゴ `logo.png` の黒背景を透過して切り出したもの、キャラクターは公式画像を縮小したもの）。ファビコンは `src/app/icon.png`
+
 ## 技術構成
 
 - Next.js（App Router）+ TypeScript

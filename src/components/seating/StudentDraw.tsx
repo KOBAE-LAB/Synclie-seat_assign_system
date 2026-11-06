@@ -131,10 +131,14 @@ export function StudentDraw({
         ))}
       </div>
 
-      <section className="card">
-        <p className="small muted" lang="ja">{lectureName}</p>
+      <section className="card card--accent">
+        <p className="eyebrow" lang="ja">{lectureName}</p>
         {result ? (
           <div className="result" role="status" aria-live="polite">
+            <div className="result-guide">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/joy.png" alt="" width={96} height={96} />
+            </div>
             <p className="result__lead">{tx("yourSeatIs")}</p>
             <p className="result__seat">
               {lang === "en" ? <span className="result__prefix">{tx("seatPrefix")} </span> : null}
@@ -160,7 +164,11 @@ export function StudentDraw({
             <p className="small muted">{tx("oncePerDevice")}</p>
           </div>
         ) : (
-          <p className="notice">{state === "before" ? tx("notStarted") : tx("closed")}</p>
+          <div className="guide waiting-guide">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={state === "before" ? "/brand/thinking.png" : "/brand/neutral.png"} alt="" width={72} height={80} />
+            <p>{state === "before" ? tx("notStarted") : tx("closed")}</p>
+          </div>
         )}
         {status.error ? (
           <p className="form-error" role="alert">{tx(ERROR_TEXT_KEY[status.error])}</p>

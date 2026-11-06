@@ -11,6 +11,7 @@ export default async function TtViewerPage({ searchParams }: { searchParams: Pro
   return (
     <main className="page">
       <section className="card auth-card">
+        <p className="eyebrow">OBSERVER</p>
         <h1>TT・参観コードで見る</h1>
         <p className="muted">
           TT（ティーム・ティーチング）の講師や参観者の方は、担当講師から受け取ったコードで、抽選の状況と座席図を閲覧できます（操作はできません）。
