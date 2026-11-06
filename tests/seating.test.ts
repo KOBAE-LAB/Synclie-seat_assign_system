@@ -3,44 +3,116 @@ import assert from "node:assert/strict";
 import { openDatabase, type Db } from "../src/lib/db/index.ts";
 import {
   apportion,
-  buildLayout,
+  arrangeDesks,
   chooseUsedSeats,
+  emptyLayout,
   findIslands,
   groupName,
   parseLayout,
   planLecture,
+  renumberSeats,
   spreadIndexes,
-  templateCells,
+  withSeats,
 } from "../src/lib/seating/layout.ts";
+import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, type Desk } from "../src/lib/seating/geometry.ts";
 import { saveClassroom, deleteClassroom, listClassrooms } from "../src/lib/seating/classrooms.ts";
 import { createLecture, getLecture, getLectureByToken, setAcceptState } from "../src/lib/seating/lectures.ts";
 import { cancelDraw, drawForDevice, listDraws, proxyDraw, resetDraws } from "../src/lib/seating/draws.ts";
 
-// 3 列ごとに通路、4 行 → 島は 2 つ（各 3 列 × 4 行 = 12 席）、合計 24 席
-const layout = buildLayout(4, 7, templateCells(4, 7, 3));
+/** 旧形式（マス目）の JSON：cols 列のうち 4 列目ごとが通路 */
+function oldGridJson(rows: number, cols: number) {
+  const seats = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if ((c + 1) % 4 !== 0) seats.push({ number: 0, row: r, col: c });
+  return { version: 1, kind: "grid", rows, cols, seats, desks: [], fixtures: [] };
+}
+
+// 旧形式から変換：3 列ずつ 2 島 × 4 行 = 24 席
+const layout = parseLayout(oldGridJson(4, 7))!;
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
-test("席番号は前列の左から振られる", () => {
-  const l = buildLayout(2, 3, [{ row: 1, col: 0 }, { row: 0, col: 2 }, { row: 0, col: 0 }]);
-  assert.deepEqual(l.seats, [
-    { number: 1, row: 0, col: 0 },
-    { number: 2, row: 0, col: 2 },
-    { number: 3, row: 1, col: 0 },
-  ]);
-});
-
-test("parseLayout は範囲外・不正な入力を拒否する", () => {
-  assert.equal(parseLayout("not json"), null);
-  assert.equal(parseLayout({ rows: 0, cols: 3, seats: [] }), null);
-  assert.equal(parseLayout({ rows: 2, cols: 2, seats: [{ row: 2, col: 0 }] }), null);
-  assert.equal(parseLayout(JSON.stringify(layout))?.seats.length, 24);
-});
-
-test("島はつながった席のかたまり", () => {
+test("旧形式（マス目）のレイアウトは学生机の配置に変換され、席番号は前列左から", () => {
+  assert.equal(layout.kind, "free");
   assert.equal(layout.seats.length, 24);
-  const islands = findIslands(layout);
-  assert.equal(islands.length, 2);
-  assert.deepEqual(islands.map((i) => i.length), [12, 12]);
+  assert.equal(layout.desks.length, 24);
+  assert.ok(layout.desks.every((d) => d.type === "student"));
+  assert.deepEqual(layout.seats.map((s) => s.number), Array.from({ length: 24 }, (_, i) => i + 1));
+  // 1〜6 番が最前列で、左から右
+  const front = layout.seats.slice(0, 6);
+  assert.ok(front.every((s) => s.y === front[0].y));
+  assert.ok(front.every((s, i) => i === 0 || s.x > front[i - 1].x));
+  assert.ok(layout.fixtures.some((f) => f.type === "board"));
+});
+
+test("parseLayout は不正な入力を拒否し、座席は机から計算し直す", () => {
+  assert.equal(parseLayout("not json"), null);
+  assert.equal(parseLayout({ kind: "free", width: 10, height: 800, desks: [], fixtures: [] }), null);
+  const base = { kind: "free", version: 2, width: 1000, height: 800, fixtures: [] };
+  const desk = { id: "a", type: "long2", x: 100, y: 100, rotation: 0, seats: [1, 2] };
+  assert.ok(parseLayout({ ...base, desks: [desk] }));
+  assert.equal(parseLayout({ ...base, desks: [{ ...desk, seats: [1] }] }), null, "長机は 2 席");
+  assert.equal(parseLayout({ ...base, desks: [desk, { ...desk, id: "b" }] }), null, "席番号の重複");
+  assert.equal(parseLayout({ ...base, desks: [{ ...desk, type: "sofa" }] }), null, "知らない種類");
+  assert.equal(parseLayout({ ...base, desks: [{ ...desk, x: 5000 }] }), null, "部屋の外");
+  assert.equal(parseLayout({ ...base, desks: [{ ...desk, id: "a b" }] }), null, "不正な ID");
+  assert.equal(parseLayout({ ...base, desks: [{ id: "c", type: "custom", x: 100, y: 100, rotation: 0, seats: [1, 2, 3] }] }), null, "カスタムは大きさが必要");
+  const custom = parseLayout({ ...base, desks: [{ id: "c", type: "custom", x: 100, y: 100, rotation: 7, w: 200, h: 50, seats: [1, 2, 3] }] })!;
+  assert.equal(custom.seats.length, 3);
+  assert.equal(custom.desks[0].rotation, 5, "回転は 5° 刻みにそろえる");
+  // クライアントが送った seats は無視して机から計算する
+  const forged = parseLayout({ ...base, desks: [desk], seats: [{ number: 99, x: 0, y: 0, deskId: "a" }] })!;
+  assert.deepEqual(forged.seats.map((s) => s.number), [1, 2]);
+});
+
+test("机の種類ごとの席数と、回転による座席位置", () => {
+  const counts = { student: 1, tablet: 1, long2: 2, trapezoid3: 3, round4: 4 } as const;
+  for (const [type, n] of Object.entries(counts)) {
+    const d: Desk = { id: "x", type: type as Desk["type"], x: 0, y: 0, rotation: 0, seats: Array.from({ length: n }, (_, i) => i + 1) };
+    assert.equal(deskSeatPositions(d).length, n, type);
+  }
+  // 学生机：回転 0° なら座席は後ろ（+y）、180° なら前（-y）
+  const d: Desk = { id: "x", type: "student", x: 100, y: 100, rotation: 0, seats: [1] };
+  assert.ok(deskSeatPositions(d)[0].y > 100);
+  assert.ok(deskSeatPositions({ ...d, rotation: 180 })[0].y < 100);
+  assert.equal(normalizeRotation(-5), 355);
+  assert.equal(normalizeRotation(362), 0);
+});
+
+test("黒板の方を向く回転角", () => {
+  assert.equal(rotationToFace({ x: 100, y: 500 }, { x: 100, y: 0 }), 0, "真上");
+  assert.equal(rotationToFace({ x: 0, y: 100 }, { x: 500, y: 100 }), 90, "右");
+  assert.equal(rotationToFace({ x: 100, y: 0 }, { x: 100, y: 500 }), 180, "真下");
+  assert.equal(rotationToFace({ x: 0, y: 100 }, { x: 100, y: 0 }), 45, "右上");
+  // 正対：前の壁の黒板なら、斜め前にいても 0°
+  assert.equal(rotationToFaceWall({ x: 100, y: 130 }, { x: 500, y: 20, rotation: 0 }), 0);
+  // 左の壁（縦向き＝回転 90°）の黒板なら左（270°）を向く
+  assert.equal(rotationToFaceWall({ x: 500, y: 300 }, { x: 20, y: 400, rotation: 90 }), 270);
+  // 後ろの壁の黒板なら 180°
+  assert.equal(rotationToFaceWall({ x: 500, y: 300 }, { x: 500, y: 780, rotation: 0 }), 180);
+});
+
+test("六角形（台形×2）は 1 つの島、離れた机は別の島", () => {
+  const room = emptyLayout(1000, 800);
+  const hex = withSeats({
+    ...room,
+    desks: [
+      { id: "a", type: "trapezoid3", x: 300, y: 300, rotation: 0, seats: [1, 2, 3] },
+      { id: "b", type: "trapezoid3", x: 300, y: 352, rotation: 180, seats: [4, 5, 6] },
+      { id: "c", type: "round4", x: 700, y: 300, rotation: 0, seats: [7, 8, 9, 10] },
+    ],
+  });
+  assert.deepEqual(findIslands(hex), [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10]]);
+});
+
+test("まとめて並べる・席番号の振り直し", () => {
+  const desks = arrangeDesks({ type: "long2", rows: 2, cols: 3, pitchX: 150, pitchY: 100, startX: 100, startY: 100 }, 1, "t");
+  assert.equal(desks.length, 6);
+  assert.deepEqual(desks.flatMap((d) => d.seats), Array.from({ length: 12 }, (_, i) => i + 1));
+  // 番号をばらばらにしてから振り直すと、前列の左から 1, 2, 3...
+  const shuffled = withSeats({ ...emptyLayout(), desks: desks.map((d, i) => ({ ...d, seats: d.seats.map((n) => n + 100 * (6 - i)) })) });
+  const renumbered = renumberSeats(shuffled);
+  assert.deepEqual(renumbered.seats.map((s) => s.number), Array.from({ length: 12 }, (_, i) => i + 1));
+  const front = renumbered.seats.slice(0, 6);
+  assert.ok(front.every((s, i) => i === 0 || s.x > front[i - 1].x));
 });
 
 test("均等配分の補助関数", () => {
@@ -173,7 +245,7 @@ test("代理抽選・リセット", () => {
 
 test("講義作成後に教室を編集しても講義の座席図は変わらない", () => {
   const { classroomId, lectureId, token } = makeLecture(10);
-  saveClassroom(db, teacherId, { id: classroomId, name: "301", layout: buildLayout(1, 1, [{ row: 0, col: 0 }]) });
+  saveClassroom(db, teacherId, { id: classroomId, name: "301", layout: parseLayout(oldGridJson(1, 1))! });
   assert.equal(getLectureByToken(db, token)!.layout.seats.length, 24);
   assert.equal(listClassrooms(db, teacherId)[0].seatCount, 1);
   assert.equal(deleteClassroom(db, teacherId, classroomId), "in_use");

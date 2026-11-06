@@ -1,48 +1,200 @@
 /**
- * 教室レイアウト（簡易版：マス目方式）と、講義の座席割り当てを決める純粋関数。
- * 前方（row = 0 側）に黒板がある前提。席番号は前列の左から右へ、後ろへ向かって振る。
+ * 教室レイアウト（机・備品を自由に配置する方式）と、講義の座席割り当てを決める純粋関数。
+ * 旧形式（マス目方式, version 1）は読み込み時に自動で変換する。
  */
+import {
+  boxGap,
+  CUSTOM_SEAT_MAX,
+  CUSTOM_SIZE_MAX,
+  CUSTOM_SIZE_MIN,
+  DESK_SPECS,
+  deskBox,
+  deskSeatPositions,
+  FIXTURE_SPECS,
+  normalizeRotation,
+  type Desk,
+  type DeskType,
+  type Fixture,
+  type FixtureType,
+} from "./geometry.ts";
 
-export const GRID_MIN = 1;
-export const GRID_MAX = 30;
+export const ROOM_MIN = 200;
+export const ROOM_MAX = 5000;
 export const SEAT_MAX = 300;
+export const DESK_MAX = 300;
+export const FIXTURE_MAX = 100;
+/** 机どうしのすき間がこれ以下なら同じ「島」とみなす（cm） */
+export const ISLAND_GAP = 25;
 
-export type GridSeat = { number: number; row: number; col: number };
+export type LayoutSeat = { number: number; x: number; y: number; deskId: string };
 
 export type ClassroomLayout = {
-  version: 1;
-  kind: "grid";
-  rows: number;
-  cols: number;
-  seats: GridSeat[];
-  desks: unknown[];
-  fixtures: { type: "board"; position: "front" }[];
+  version: 2;
+  kind: "free";
+  width: number;
+  height: number;
+  desks: Desk[];
+  fixtures: Fixture[];
+  /** 机から計算した座席（番号順）。保存時に必ず再計算する */
+  seats: LayoutSeat[];
 };
 
-export function emptyLayout(rows = 6, cols = 8): ClassroomLayout {
-  return { version: 1, kind: "grid", rows, cols, seats: [], desks: [], fixtures: [{ type: "board", position: "front" }] };
+export function emptyLayout(width = 1000, height = 800): ClassroomLayout {
+  return withSeats({
+    version: 2,
+    kind: "free",
+    width,
+    height,
+    desks: [],
+    fixtures: [
+      { id: "f1", type: "board", x: width / 2, y: 20, w: FIXTURE_SPECS.board.w, h: FIXTURE_SPECS.board.h, rotation: 0 },
+    ],
+    seats: [],
+  });
 }
 
-/** 選択されたマスから席番号付きのレイアウトを作る（番号は前列左から） */
-export function buildLayout(rows: number, cols: number, cells: { row: number; col: number }[]): ClassroomLayout {
-  const key = (r: number, c: number) => r * cols + c;
-  const unique = new Map<number, { row: number; col: number }>();
-  for (const cell of cells) {
-    if (cell.row < 0 || cell.row >= rows || cell.col < 0 || cell.col >= cols) continue;
-    unique.set(key(cell.row, cell.col), cell);
+/** 机の情報から座席一覧を計算し直す */
+export function withSeats(layout: Omit<ClassroomLayout, "seats"> & { seats?: LayoutSeat[] }): ClassroomLayout {
+  const seats: LayoutSeat[] = [];
+  for (const d of layout.desks) {
+    deskSeatPositions(d).forEach((p, i) => {
+      seats.push({ number: d.seats[i], x: Math.round(p.x), y: Math.round(p.y), deskId: d.id });
+    });
   }
-  const sorted = [...unique.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
-  return {
-    ...emptyLayout(rows, cols),
-    seats: sorted.map((c, i) => ({ number: i + 1, row: c.row, col: c.col })),
-  };
+  seats.sort((a, b) => a.number - b.number);
+  return { ...layout, seats };
 }
+
+/**
+ * 座席番号を前から順に振り直す（前の列の左から右へ）。
+ * 座席の y が ROW_TOLERANCE 以内なら同じ列とみなす。
+ */
+export function renumberSeats(layout: ClassroomLayout, rowTolerance = 40): ClassroomLayout {
+  const all = layout.desks.flatMap((d) =>
+    deskSeatPositions(d).map((p, i) => ({ deskId: d.id, index: i, x: p.x, y: p.y })),
+  );
+  all.sort((a, b) => a.y - b.y);
+  const rows: (typeof all)[] = [];
+  for (const s of all) {
+    const row = rows.at(-1);
+    if (row && s.y - row[0].y <= rowTolerance) row.push(s);
+    else rows.push([s]);
+  }
+  let n = 1;
+  const numberOf = new Map<string, number>();
+  for (const row of rows) {
+    row.sort((a, b) => a.x - b.x);
+    for (const s of row) numberOf.set(`${s.deskId}:${s.index}`, n++);
+  }
+  return withSeats({
+    ...layout,
+    desks: layout.desks.map((d) => ({ ...d, seats: d.seats.map((_, i) => numberOf.get(`${d.id}:${i}`)!) })),
+  });
+}
+
+/** 次に使う座席番号 */
+export function nextSeatNumber(layout: ClassroomLayout): number {
+  return layout.desks.reduce((m, d) => Math.max(m, ...d.seats), 0) + 1;
+}
+
+// ---------- 旧形式（マス目）からの変換 ----------
+
+const GRID_PITCH_X = 80;
+const GRID_PITCH_Y = 95;
+
+/** 旧形式のマス目レイアウトを、学生机を並べた自由配置に変換する（席番号は維持） */
+export function gridToFree(rows: number, cols: number, seats: { number: number; row: number; col: number }[]): ClassroomLayout {
+  const width = Math.max(ROOM_MIN, cols * GRID_PITCH_X + 120);
+  const height = Math.max(ROOM_MIN, rows * GRID_PITCH_Y + 160);
+  return withSeats({
+    version: 2,
+    kind: "free",
+    width,
+    height,
+    desks: seats.map((s) => ({
+      id: `d${s.number}`,
+      type: "student" as const,
+      x: 60 + GRID_PITCH_X / 2 + s.col * GRID_PITCH_X,
+      y: 110 + s.row * GRID_PITCH_Y,
+      rotation: 0,
+      seats: [s.number],
+    })),
+    fixtures: [{ id: "f1", type: "board", x: width / 2, y: 20, w: Math.min(360, width - 40), h: 16, rotation: 0 }],
+  });
+}
+
+// ---------- 検証 ----------
+
+const DESK_TYPES = Object.keys(DESK_SPECS) as DeskType[];
+const FIXTURE_TYPES = Object.keys(FIXTURE_SPECS) as FixtureType[];
 
 function isInt(v: unknown, min: number, max: number): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 }
+function isNum(v: unknown, min: number, max: number): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
+}
+function isId(v: unknown): v is string {
+  return typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(v);
+}
 
-/** 外部から来た JSON を検証してレイアウトにする。不正なら null */
+function parseGrid(o: Record<string, unknown>): ClassroomLayout | null {
+  if (!isInt(o.rows, 1, 30) || !isInt(o.cols, 1, 30) || !Array.isArray(o.seats)) return null;
+  const rows = o.rows;
+  const cols = o.cols;
+  const cells: { row: number; col: number }[] = [];
+  for (const s of o.seats) {
+    if (!s || typeof s !== "object") return null;
+    const { row, col } = s as Record<string, unknown>;
+    if (!isInt(row, 0, rows - 1) || !isInt(col, 0, cols - 1)) return null;
+    cells.push({ row, col });
+  }
+  // 旧形式は前列左から順に番号を振っていた
+  const unique = [...new Map(cells.map((c) => [c.row * cols + c.col, c])).entries()].sort((a, b) => a[0] - b[0]);
+  return gridToFree(rows, cols, unique.map(([, c], i) => ({ number: i + 1, ...c })));
+}
+
+function parseDesk(v: unknown, room: { width: number; height: number }): Desk | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (!isId(o.id) || !DESK_TYPES.includes(o.type as DeskType)) return null;
+  if (!isNum(o.x, 0, room.width) || !isNum(o.y, 0, room.height) || !isNum(o.rotation, -3600, 3600)) return null;
+  if (!Array.isArray(o.seats) || !o.seats.every((n) => isInt(n, 1, 9999))) return null;
+  const type = o.type as DeskType;
+  const desk: Desk = { id: o.id, type, x: Math.round(o.x), y: Math.round(o.y), rotation: normalizeRotation(o.rotation), seats: o.seats as number[] };
+  const fixed = DESK_SPECS[type].seatCount;
+  if (fixed !== null) {
+    if (desk.seats.length !== fixed) return null;
+  } else {
+    if (desk.seats.length < 1 || desk.seats.length > CUSTOM_SEAT_MAX) return null;
+    if (!isNum(o.w, CUSTOM_SIZE_MIN, CUSTOM_SIZE_MAX) || !isNum(o.h, CUSTOM_SIZE_MIN, CUSTOM_SIZE_MAX)) return null;
+    desk.w = Math.round(o.w);
+    desk.h = Math.round(o.h);
+  }
+  return desk;
+}
+
+function parseFixture(v: unknown, room: { width: number; height: number }): Fixture | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (!isId(o.id) || !FIXTURE_TYPES.includes(o.type as FixtureType)) return null;
+  if (!isNum(o.x, 0, room.width) || !isNum(o.y, 0, room.height) || !isNum(o.rotation, -3600, 3600)) return null;
+  if (!isNum(o.w, 4, ROOM_MAX) || !isNum(o.h, 4, ROOM_MAX)) return null;
+  if (o.label !== undefined && (typeof o.label !== "string" || o.label.length > 30)) return null;
+  const f: Fixture = {
+    id: o.id,
+    type: o.type as FixtureType,
+    x: Math.round(o.x),
+    y: Math.round(o.y),
+    w: Math.round(o.w),
+    h: Math.round(o.h),
+    rotation: normalizeRotation(o.rotation),
+  };
+  if (typeof o.label === "string" && o.label.trim()) f.label = o.label.trim();
+  return f;
+}
+
+/** 外部から来た JSON を検証してレイアウトにする。不正なら null（旧形式は変換する） */
 export function parseLayout(input: unknown): ClassroomLayout | null {
   if (typeof input === "string") {
     try {
@@ -53,45 +205,91 @@ export function parseLayout(input: unknown): ClassroomLayout | null {
   }
   if (!input || typeof input !== "object") return null;
   const o = input as Record<string, unknown>;
-  if (!isInt(o.rows, GRID_MIN, GRID_MAX) || !isInt(o.cols, GRID_MIN, GRID_MAX)) return null;
-  if (!Array.isArray(o.seats) || o.seats.length > SEAT_MAX) return null;
-  const rows = o.rows;
-  const cols = o.cols;
-  const cells: { row: number; col: number }[] = [];
-  for (const s of o.seats) {
-    if (!s || typeof s !== "object") return null;
-    const { row, col } = s as Record<string, unknown>;
-    if (!isInt(row, 0, rows - 1) || !isInt(col, 0, cols - 1)) return null;
-    cells.push({ row, col });
+  if (o.kind === "grid" || (o.rows !== undefined && o.cols !== undefined)) return parseGrid(o);
+  if (o.kind !== "free") return null;
+  if (!isInt(o.width, ROOM_MIN, ROOM_MAX) || !isInt(o.height, ROOM_MIN, ROOM_MAX)) return null;
+  if (!Array.isArray(o.desks) || o.desks.length > DESK_MAX) return null;
+  if (!Array.isArray(o.fixtures) || o.fixtures.length > FIXTURE_MAX) return null;
+  const room = { width: o.width, height: o.height };
+  const desks: Desk[] = [];
+  for (const d of o.desks) {
+    const desk = parseDesk(d, room);
+    if (!desk) return null;
+    desks.push(desk);
   }
-  return buildLayout(rows, cols, cells);
+  const fixtures: Fixture[] = [];
+  for (const f of o.fixtures) {
+    const fixture = parseFixture(f, room);
+    if (!fixture) return null;
+    fixtures.push(fixture);
+  }
+  const ids = [...desks.map((d) => d.id), ...fixtures.map((f) => f.id)];
+  if (new Set(ids).size !== ids.length) return null;
+  const numbers = desks.flatMap((d) => d.seats);
+  if (numbers.length > SEAT_MAX || new Set(numbers).size !== numbers.length) return null;
+  return withSeats({ version: 2, kind: "free", width: room.width, height: room.height, desks, fixtures });
 }
 
-/** 上下左右でつながった席のかたまり（島）ごとに席番号をまとめる。島は最小の席番号順 */
+/** 机どうしのすき間が ISLAND_GAP 以下ならつなげた、席番号のかたまり（島）。島は最小の席番号順 */
 export function findIslands(layout: ClassroomLayout): number[][] {
-  const byPos = new Map<string, GridSeat>();
-  for (const s of layout.seats) byPos.set(`${s.row},${s.col}`, s);
-  const seen = new Set<number>();
-  const islands: number[][] = [];
-  for (const start of [...layout.seats].sort((a, b) => a.number - b.number)) {
-    if (seen.has(start.number)) continue;
-    const island: number[] = [];
-    const stack = [start];
-    seen.add(start.number);
-    while (stack.length) {
-      const s = stack.pop()!;
-      island.push(s.number);
-      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const n = byPos.get(`${s.row + dr},${s.col + dc}`);
-        if (n && !seen.has(n.number)) {
-          seen.add(n.number);
-          stack.push(n);
-        }
-      }
+  const desks = layout.desks.filter((d) => d.seats.length);
+  const boxes = desks.map(deskBox);
+  const parent = desks.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < desks.length; i++) {
+    for (let j = i + 1; j < desks.length; j++) {
+      if (boxGap(boxes[i], boxes[j]) <= ISLAND_GAP) parent[find(i)] = find(j);
     }
-    islands.push(island.sort((a, b) => a - b));
   }
-  return islands;
+  const groups = new Map<number, number[]>();
+  desks.forEach((d, i) => {
+    const root = find(i);
+    groups.set(root, [...(groups.get(root) ?? []), ...d.seats]);
+  });
+  return [...groups.values()].map((g) => g.sort((a, b) => a - b)).sort((a, b) => a[0] - b[0]);
+}
+
+// ---------- 机を並べて配置 ----------
+
+export type ArrangeOptions = {
+  type: DeskType;
+  rows: number;
+  cols: number;
+  /** 机の中心どうしの間隔 */
+  pitchX: number;
+  pitchY: number;
+  /** 左上の机の中心 */
+  startX: number;
+  startY: number;
+  /** custom のときの席数・大きさ */
+  customSeats?: number;
+  customW?: number;
+  customH?: number;
+};
+
+/** 机を rows × cols に並べる（席番号は firstNumber から） */
+export function arrangeDesks(opts: ArrangeOptions, firstNumber: number, idPrefix: string): Desk[] {
+  const desks: Desk[] = [];
+  let n = firstNumber;
+  const count = DESK_SPECS[opts.type].seatCount ?? Math.max(1, Math.min(CUSTOM_SEAT_MAX, opts.customSeats ?? 2));
+  for (let r = 0; r < opts.rows; r++) {
+    for (let c = 0; c < opts.cols; c++) {
+      const desk: Desk = {
+        id: `${idPrefix}${r}-${c}`,
+        type: opts.type,
+        x: Math.round(opts.startX + c * opts.pitchX),
+        y: Math.round(opts.startY + r * opts.pitchY),
+        rotation: 0,
+        seats: Array.from({ length: count }, () => n++),
+      };
+      if (opts.type === "custom") {
+        desk.w = opts.customW ?? 120;
+        desk.h = opts.customH ?? 40;
+      }
+      desks.push(desk);
+    }
+  }
+  return desks;
 }
 
 /** n 個から k 個を均等な間隔で選ぶ（インデックスを返す） */
@@ -200,23 +398,3 @@ export function planLecture(layout: ClassroomLayout, enrolled: number, mode: Gro
   };
 }
 
-/**
- * よく使う形のひな形。islandWidth 列ごと・islandHeight 行ごとに通路（空きマス）を入れる。
- * 0 を指定した方向には通路を入れない。
- */
-export function templateCells(
-  rows: number,
-  cols: number,
-  islandWidth: number,
-  islandHeight = 0,
-): { row: number; col: number }[] {
-  const cells: { row: number; col: number }[] = [];
-  for (let r = 0; r < rows; r++) {
-    if (islandHeight > 0 && (r + 1) % (islandHeight + 1) === 0) continue;
-    for (let c = 0; c < cols; c++) {
-      if (islandWidth > 0 && (c + 1) % (islandWidth + 1) === 0) continue;
-      cells.push({ row: r, col: c });
-    }
-  }
-  return cells;
-}
