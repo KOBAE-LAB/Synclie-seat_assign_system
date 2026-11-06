@@ -33,7 +33,11 @@ import {
 } from "@/lib/seating/layout";
 import { DeskBody, DeskFront, FixtureShape } from "./Shapes";
 
-type Selection = { kind: "desk" | "fixture"; id: string } | null;
+type Kind = "desk" | "fixture";
+/** 選択中の机・備品（"desk:ID" / "fixture:ID"） */
+type Selection = ReadonlySet<string>;
+const selKey = (kind: Kind, id: string) => `${kind}:${id}`;
+const EMPTY: Selection = new Set();
 type Room = Omit<ClassroomLayout, "seats">;
 
 const SNAP = 5;
@@ -80,18 +84,38 @@ export function ClassroomEditor({
   const [history, setHistory] = useState<Room[]>([]);
   const [notice, setNotice] = useState("");
   const [roomDraft, setRoomDraft] = useState<{ width: string; height: string } | null>(null);
-  const [selection, setSelection] = useState<Selection>(null);
+  const [selection, setSelection] = useState<Selection>(EMPTY);
+  const [multiMode, setMultiMode] = useState(false);
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [customSeats, setCustomSeats] = useState(3);
   const [customW, setCustomW] = useState(150);
   const [customH, setCustomH] = useState(45);
   const [arrange, setArrange] = useState({ type: "student" as DeskType, rows: 6, cols: 8, pitchX: 80, pitchY: 95, startX: 100, startY: 130 });
   const svgRef = useRef<SVGSVGElement>(null);
-  const dragRef = useRef<{ kind: "desk" | "fixture"; id: string; dx: number; dy: number; moved: boolean } | null>(null);
+  /** ドラッグ中の情報：開始位置と、動かす机・備品の開始座標 */
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    items: { kind: Kind; id: string; x: number; y: number }[];
+    moved: boolean;
+    /** 選択済みの 1 つを押しただけ（動かさず離した）なら、それだけを選び直す */
+    pendingSingle: { kind: Kind; id: string } | null;
+  } | null>(null);
+  const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean } | null>(null);
 
   const layout = useMemo(() => withSeats(room), [room]);
   const islands = useMemo(() => findIslands(layout).length, [layout]);
-  const selectedDesk = selection?.kind === "desk" ? room.desks.find((d) => d.id === selection.id) : undefined;
-  const selectedFixture = selection?.kind === "fixture" ? room.fixtures.find((f) => f.id === selection.id) : undefined;
+  const isSelected = (kind: Kind, id: string) => selection.has(selKey(kind, id));
+  const selectedDesks = room.desks.filter((d) => isSelected("desk", d.id));
+  const selectedFixtures = room.fixtures.filter((f) => isSelected("fixture", f.id));
+  const selectedCount = selectedDesks.length + selectedFixtures.length;
+  // 1 つだけ選んでいるときは、その机・備品の詳しい設定を出す
+  const selectedDesk = selectedCount === 1 ? selectedDesks[0] : undefined;
+  const selectedFixture = selectedCount === 1 ? selectedFixtures[0] : undefined;
+  const selectOnly = (kind: Kind, id: string) => setSelection(new Set([selKey(kind, id)]));
+  const clearSelection = () => setSelection(EMPTY);
+  const selectAll = () =>
+    setSelection(new Set([...room.desks.map((d) => selKey("desk", d.id)), ...room.fixtures.map((f) => selKey("fixture", f.id))]));
   const faceTarget =
     room.fixtures.find((f) => f.type === "board") ??
     room.fixtures.find((f) => f.type === "screen") ??
@@ -131,17 +155,20 @@ export function ClassroomEditor({
       }
       return { ...r, desks: [...r.desks, desk] };
     });
-    setSelection({ kind: "desk", id: deskId });
+    selectOnly("desk", deskId);
   }
 
   function addHexagon() {
+    const ids = [newId("d"), newId("d")];
     update((r) => {
       const first = nextSeatNumber(withSeats(r));
       const { x, y } = placeAt(r);
-      const a: Desk = { id: newId("d"), type: "trapezoid3", x, y: y - 26, rotation: 0, seats: [first, first + 1, first + 2] };
-      const b: Desk = { id: newId("d"), type: "trapezoid3", x, y: y + 26, rotation: 180, seats: [first + 3, first + 4, first + 5] };
+      const a: Desk = { id: ids[0], type: "trapezoid3", x, y: y - 26, rotation: 0, seats: [first, first + 1, first + 2] };
+      const b: Desk = { id: ids[1], type: "trapezoid3", x, y: y + 26, rotation: 180, seats: [first + 3, first + 4, first + 5] };
       return { ...r, desks: [...r.desks, a, b] };
     });
+    // 2 つまとめて選んでおき、そのまま一緒に動かせるようにする
+    setSelection(new Set(ids.map((i) => selKey("desk", i))));
   }
 
   function addFixture(type: FixtureType) {
@@ -151,7 +178,7 @@ export function ClassroomEditor({
       const pos = type === "board" ? { x: snap(r.width / 2), y: 20 } : placeAt(r);
       return { ...r, fixtures: [...r.fixtures, { id: fixtureId, type, ...pos, w: spec.w, h: spec.h, rotation: 0 }] };
     });
-    setSelection({ kind: "fixture", id: fixtureId });
+    selectOnly("fixture", fixtureId);
   }
 
   function patchDesk(deskId: string, patch: Partial<Desk>) {
@@ -172,53 +199,80 @@ export function ClassroomEditor({
   }
 
   function removeSelected() {
-    if (!selection) return;
-    update((r) =>
-      selection.kind === "desk"
-        ? { ...r, desks: r.desks.filter((d) => d.id !== selection.id) }
-        : { ...r, fixtures: r.fixtures.filter((f) => f.id !== selection.id) },
-    );
-    setSelection(null);
+    if (!selectedCount) return;
+    update((r) => ({
+      ...r,
+      desks: r.desks.filter((d) => !selection.has(selKey("desk", d.id))),
+      fixtures: r.fixtures.filter((f) => !selection.has(selKey("fixture", f.id))),
+    }));
+    clearSelection();
   }
 
+  /** 選択中のものをまとめて複製（右下にずらし、席番号は新しく振る）。複製したものを選択する */
   function duplicateSelected() {
-    if (!selection) return;
-    const copyId = newId(selection.kind === "desk" ? "d" : "f");
+    if (!selectedCount) return;
+    const deskCopies = selectedDesks.map((d) => ({ from: d, id: newId("d") }));
+    const fixtureCopies = selectedFixtures.map((f) => ({ from: f, id: newId("f") }));
     update((r) => {
-      if (selection.kind === "desk") {
-        const d = r.desks.find((x) => x.id === selection.id);
-        if (!d) return r;
-        let n = nextSeatNumber(withSeats(r));
-        const copy: Desk = { ...d, id: copyId, x: clamp(d.x + 40, 0, r.width), y: clamp(d.y + 40, 0, r.height), seats: d.seats.map(() => n++) };
-        return { ...r, desks: [...r.desks, copy] };
-      }
-      const f = r.fixtures.find((x) => x.id === selection.id);
-      if (!f) return r;
-      return { ...r, fixtures: [...r.fixtures, { ...f, id: copyId, x: clamp(f.x + 40, 0, r.width), y: clamp(f.y + 40, 0, r.height) }] };
+      let n = nextSeatNumber(withSeats(r));
+      const desks = deskCopies.map(({ from, id }) => ({
+        ...from,
+        id,
+        x: clamp(from.x + 40, 0, r.width),
+        y: clamp(from.y + 40, 0, r.height),
+        seats: from.seats.map(() => n++),
+      }));
+      const fixtures = fixtureCopies.map(({ from, id }) => ({
+        ...from,
+        id,
+        x: clamp(from.x + 40, 0, r.width),
+        y: clamp(from.y + 40, 0, r.height),
+      }));
+      return { ...r, desks: [...r.desks, ...desks], fixtures: [...r.fixtures, ...fixtures] };
     });
-    setSelection({ kind: selection.kind, id: copyId });
+    setSelection(
+      new Set([...deskCopies.map((c) => selKey("desk", c.id)), ...fixtureCopies.map((c) => selKey("fixture", c.id))]),
+    );
   }
 
-  function rotateSelected(delta: number) {
-    if (selectedDesk) patchDesk(selectedDesk.id, { rotation: normalizeRotation(selectedDesk.rotation + delta) });
-    if (selectedFixture) patchFixture(selectedFixture.id, { rotation: normalizeRotation(selectedFixture.rotation + delta) });
+  /** 選択中のものを、それぞれその場で回す（delta）か、角度をそろえる（to） */
+  function rotateSelected(delta: number, to?: number) {
+    if (!selectedCount) return;
+    const turn = (rot: number) => normalizeRotation(to ?? rot + delta);
+    update((r) => ({
+      ...r,
+      desks: r.desks.map((d) => (selection.has(selKey("desk", d.id)) ? { ...d, rotation: turn(d.rotation) } : d)),
+      fixtures: r.fixtures.map((f) => (selection.has(selKey("fixture", f.id)) ? { ...f, rotation: turn(f.rotation) } : f)),
+    }));
   }
 
-  /** fan = false：黒板に正対（平行）、fan = true：黒板の中心に向ける（扇形） */
-  function faceBoard(only?: Desk, fan = false) {
+  /**
+   * 机を黒板に向ける。onlySelected = true なら選択中の机だけ。
+   * fan = false：黒板に正対（平行）、fan = true：黒板の中心に向ける（扇形）
+   */
+  function faceBoard(onlySelected: boolean, fan = false) {
     if (!faceTarget) return;
     update((r) => ({
       ...r,
       desks: r.desks.map((d) => {
-        if ((only && d.id !== only.id) || d.type === "round4") return d;
+        if ((onlySelected && !selection.has(selKey("desk", d.id))) || d.type === "round4") return d;
         return { ...d, rotation: fan ? rotationToFace(d, faceTarget) : rotationToFaceWall(d, faceTarget) };
       }),
     }));
   }
 
+  /** 選択中のものをまとめて動かす。はみ出さないよう、全体が部屋に収まる範囲で動かす */
   function moveSelected(dx: number, dy: number) {
-    if (selectedDesk) patchDesk(selectedDesk.id, { x: clamp(selectedDesk.x + dx, 0, room.width), y: clamp(selectedDesk.y + dy, 0, room.height) });
-    if (selectedFixture) patchFixture(selectedFixture.id, { x: clamp(selectedFixture.x + dx, 0, room.width), y: clamp(selectedFixture.y + dy, 0, room.height) });
+    if (!selectedCount) return;
+    const items = [...selectedDesks, ...selectedFixtures];
+    const ddx = clamp(dx, -Math.min(...items.map((i) => i.x)), room.width - Math.max(...items.map((i) => i.x)));
+    const ddy = clamp(dy, -Math.min(...items.map((i) => i.y)), room.height - Math.max(...items.map((i) => i.y)));
+    if (!ddx && !ddy) return;
+    update((r) => ({
+      ...r,
+      desks: r.desks.map((d) => (selection.has(selKey("desk", d.id)) ? { ...d, x: d.x + ddx, y: d.y + ddy } : d)),
+      fixtures: r.fixtures.map((f) => (selection.has(selKey("fixture", f.id)) ? { ...f, x: f.x + ddx, y: f.y + ddy } : f)),
+    }));
   }
 
   function runArrange(replace: boolean) {
@@ -236,7 +290,7 @@ export function ClassroomEditor({
     setNotice("");
     const fitted = fitRoom({ ...base, desks: [...base.desks, ...desks] });
     update(() => fitted);
-    setSelection(null);
+    clearSelection();
   }
 
   /** 机・備品が部屋からはみ出したら、部屋を広げて収める */
@@ -265,27 +319,79 @@ export function ClassroomEditor({
     return { x: p.x, y: p.y };
   }
 
-  function onItemPointerDown(e: React.PointerEvent, kind: "desk" | "fixture", item: { id: string; x: number; y: number }) {
+  function onItemPointerDown(e: React.PointerEvent, kind: Kind, item: { id: string }) {
     e.stopPropagation();
     e.preventDefault();
-    setSelection({ kind, id: item.id });
+    svgRef.current?.focus();
+    const key = selKey(kind, item.id);
+    const toggle = multiMode || e.shiftKey || e.metaKey || e.ctrlKey;
+    let next: Set<string>;
+    let pendingSingle: { kind: Kind; id: string } | null = null;
+    if (toggle) {
+      next = new Set(selection);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+    } else if (selection.has(key)) {
+      // 選択済みのものを押した：そのままグループで動かせるようにし、動かさなければそれだけを選び直す
+      next = new Set(selection);
+      if (selection.size > 1) pendingSingle = { kind, id: item.id };
+    } else {
+      next = new Set([key]);
+    }
+    setSelection(next);
+    if (!next.has(key)) return; // 選択から外しただけ
     const p = svgPoint(e);
-    dragRef.current = { kind, id: item.id, dx: p.x - item.x, dy: p.y - item.y, moved: false };
+    const items = [
+      ...room.desks.filter((d) => next.has(selKey("desk", d.id))).map((d) => ({ kind: "desk" as const, id: d.id, x: d.x, y: d.y })),
+      ...room.fixtures
+        .filter((f) => next.has(selKey("fixture", f.id)))
+        .map((f) => ({ kind: "fixture" as const, id: f.id, x: f.x, y: f.y })),
+    ];
+    dragRef.current = { startX: p.x, startY: p.y, items, moved: false, pendingSingle };
+    svgRef.current?.setPointerCapture(e.pointerId);
+  }
+
+  /** 何もないところを押した：範囲選択を始める（Shift などを押していれば今の選択に足す） */
+  function onBackgroundPointerDown(e: React.PointerEvent) {
+    const p = svgPoint(e);
+    const additive = multiMode || e.shiftKey || e.metaKey || e.ctrlKey;
+    if (!additive) clearSelection();
+    marqueeRef.current = { x0: p.x, y0: p.y, additive };
+    setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
     svgRef.current?.setPointerCapture(e.pointerId);
     svgRef.current?.focus();
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    const drag = dragRef.current;
-    if (!drag) return;
     const p = svgPoint(e);
-    const x = snap(clamp(p.x - drag.dx, 0, room.width));
-    const y = snap(clamp(p.y - drag.dy, 0, room.height));
+    const m = marqueeRef.current;
+    if (m) {
+      setMarquee({ x0: m.x0, y0: m.y0, x1: p.x, y1: p.y });
+      return;
+    }
+    const drag = dragRef.current;
+    if (!drag || !drag.items.length) return;
+    // 全体が部屋に収まる範囲で、5 cm 刻みに動かす
+    const minX = Math.min(...drag.items.map((i) => i.x));
+    const maxX = Math.max(...drag.items.map((i) => i.x));
+    const minY = Math.min(...drag.items.map((i) => i.y));
+    const maxY = Math.max(...drag.items.map((i) => i.y));
+    const dx = clamp(snap(p.x - drag.startX), -minX, room.width - maxX);
+    const dy = clamp(snap(p.y - drag.startY), -minY, room.height - maxY);
+    if (!drag.moved && !dx && !dy) return;
+    const at = new Map(drag.items.map((i) => [selKey(i.kind, i.id), i]));
+    const apply = (r: Room): Room => ({
+      ...r,
+      desks: r.desks.map((d) => {
+        const s0 = at.get(selKey("desk", d.id));
+        return s0 ? { ...d, x: s0.x + dx, y: s0.y + dy } : d;
+      }),
+      fixtures: r.fixtures.map((f) => {
+        const s0 = at.get(selKey("fixture", f.id));
+        return s0 ? { ...f, x: s0.x + dx, y: s0.y + dy } : f;
+      }),
+    });
     // ドラッグ開始時に 1 回だけ履歴に積み、移動中は履歴を増やさない
-    const apply = (r: Room): Room =>
-      drag.kind === "desk"
-        ? { ...r, desks: r.desks.map((d) => (d.id === drag.id ? { ...d, x, y } : d)) }
-        : { ...r, fixtures: r.fixtures.map((f) => (f.id === drag.id ? { ...f, x, y } : f)) };
     if (!drag.moved) {
       drag.moved = true;
       update(apply);
@@ -295,17 +401,47 @@ export function ClassroomEditor({
   }
 
   function onPointerUp() {
+    const m = marqueeRef.current;
+    if (m && marquee) {
+      const x0 = Math.min(marquee.x0, marquee.x1);
+      const x1 = Math.max(marquee.x0, marquee.x1);
+      const y0 = Math.min(marquee.y0, marquee.y1);
+      const y1 = Math.max(marquee.y0, marquee.y1);
+      // 小さすぎる範囲は「何もないところを押した」だけとみなす
+      if (x1 - x0 > 4 || y1 - y0 > 4) {
+        const inside = (o: { x: number; y: number }) => o.x >= x0 && o.x <= x1 && o.y >= y0 && o.y <= y1;
+        const next = new Set(m.additive ? selection : []);
+        room.desks.filter(inside).forEach((d) => next.add(selKey("desk", d.id)));
+        room.fixtures.filter(inside).forEach((f) => next.add(selKey("fixture", f.id)));
+        setSelection(next);
+      }
+    }
+    marqueeRef.current = null;
+    setMarquee(null);
+    const drag = dragRef.current;
+    if (drag && !drag.moved && drag.pendingSingle) selectOnly(drag.pendingSingle.kind, drag.pendingSingle.id);
     dragRef.current = null;
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
     const step = e.shiftKey ? 25 : SNAP;
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === "z") {
       e.preventDefault();
       undo();
       return;
     }
-    if (!selection) return;
+    if (mod && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      selectAll();
+      return;
+    }
+    if (!selectedCount) return;
+    if (mod && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      duplicateSelected();
+      return;
+    }
     const keys: Record<string, () => void> = {
       ArrowLeft: () => moveSelected(-step, 0),
       ArrowRight: () => moveSelected(step, 0),
@@ -315,13 +451,8 @@ export function ClassroomEditor({
       Backspace: removeSelected,
       r: () => rotateSelected(5),
       R: () => rotateSelected(-5),
-      Escape: () => setSelection(null),
+      Escape: clearSelection,
     };
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
-      e.preventDefault();
-      duplicateSelected();
-      return;
-    }
     const fn = keys[e.key];
     if (fn) {
       e.preventDefault();
@@ -430,11 +561,22 @@ export function ClassroomEditor({
         <div className="editor__canvas-wrap">
           <div className="editor__toolbar">
             <button type="button" className="button button--secondary button--small" onClick={undo} disabled={!history.length}>元に戻す</button>
-            <button type="button" className="button button--secondary button--small" onClick={() => faceBoard()} disabled={!faceTarget || !room.desks.length}
+            <button type="button" className="button button--secondary button--small" onClick={selectAll} disabled={!room.desks.length && !room.fixtures.length}>
+              すべて選択
+            </button>
+            <button type="button" className="button button--secondary button--small" onClick={clearSelection} disabled={!selectedCount}>
+              選択を解除
+            </button>
+            <button type="button" className={multiMode ? "button button--small" : "button button--secondary button--small"}
+              aria-pressed={multiMode} onClick={() => setMultiMode((v) => !v)}
+              title="オンにすると、押すたびに選択に追加・解除できます（タブレット向け）">
+              複数選択{multiMode ? "：オン" : ""}
+            </button>
+            <button type="button" className="button button--secondary button--small" onClick={() => faceBoard(false)} disabled={!faceTarget || !room.desks.length}
               title={faceTarget ? "" : "黒板・スクリーン・教卓のどれかを置いてください"}>
               すべての机を黒板に向ける
             </button>
-            <button type="button" className="button button--secondary button--small" onClick={() => faceBoard(undefined, true)} disabled={!faceTarget || !room.desks.length}
+            <button type="button" className="button button--secondary button--small" onClick={() => faceBoard(false, true)} disabled={!faceTarget || !room.desks.length}
               title="黒板の中心に向けて、扇形に並べます">
               扇形に黒板の中心へ向ける
             </button>
@@ -442,10 +584,13 @@ export function ClassroomEditor({
               席番号を前から振り直す
             </button>
             <button type="button" className="button button--secondary button--small"
-              onClick={() => { if (window.confirm("机と備品をすべて消しますか？")) { update((r) => ({ ...r, desks: [], fixtures: [] })); setSelection(null); } }}>
+              onClick={() => { if (window.confirm("机と備品をすべて消しますか？")) { update((r) => ({ ...r, desks: [], fixtures: [] })); clearSelection(); } }}>
               すべて消す
             </button>
-            <span className="editor__summary">席 <strong>{layout.seats.length}</strong>・机 {room.desks.length}・島 {islands}</span>
+            <span className="editor__summary">
+              {selectedCount ? <span className="editor__selected">{selectedCount} 個を選択中・</span> : null}
+              席 <strong>{layout.seats.length}</strong>・机 {room.desks.length}・島 {islands}
+            </span>
           </div>
 
           <svg
@@ -456,7 +601,7 @@ export function ClassroomEditor({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
-            onPointerDown={() => setSelection(null)}
+            onPointerDown={onBackgroundPointerDown}
             onKeyDown={onKeyDown}
             aria-label="教室の配置。机や備品を押して選び、ドラッグで動かせます。矢印キーで移動、R で回転、Delete で削除。"
           >
@@ -464,11 +609,11 @@ export function ClassroomEditor({
             <g className="room-grid">{gridLines}</g>
             {room.fixtures.map((f) => (
               <g key={f.id} className="draggable" onPointerDown={(e) => onItemPointerDown(e, "fixture", f)}>
-                <FixtureShape fixture={f} selected={selection?.kind === "fixture" && selection.id === f.id} />
+                <FixtureShape fixture={f} selected={isSelected("fixture", f.id)} />
               </g>
             ))}
             {room.desks.map((d) => {
-              const selected = selection?.kind === "desk" && selection.id === d.id;
+              const selected = isSelected("desk", d.id);
               return (
                 <g key={d.id} className="draggable" onPointerDown={(e) => onItemPointerDown(e, "desk", d)}>
                   <DeskBody desk={d} selected={selected} />
@@ -486,9 +631,21 @@ export function ClassroomEditor({
                 <text x={s.x} y={s.y + 6} textAnchor="middle">{s.number}</text>
               </g>
             ))}
+            {marquee ? (
+              <rect
+                className="marquee"
+                x={Math.min(marquee.x0, marquee.x1)}
+                y={Math.min(marquee.y0, marquee.y1)}
+                width={Math.abs(marquee.x1 - marquee.x0)}
+                height={Math.abs(marquee.y1 - marquee.y0)}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null}
           </svg>
           <p className="small muted">
-            上が前（黒板側）です。机の小さな三角が机の向きです。押して選び、ドラッグで移動。選んだ状態で 矢印キー＝移動（Shift で大きく）、R＝回転、Delete＝削除、Ctrl/⌘+D＝複製、Ctrl/⌘+Z＝元に戻す。
+            上が前（黒板側）です。机の小さな三角が机の向きです。押して選び、ドラッグで移動。
+            <strong>複数選択</strong>：何もないところからドラッグで囲む、Shift・Ctrl/⌘ を押しながら押す、または「複数選択」をオン。選んだものはまとめて動かせます。
+            Ctrl/⌘+A＝すべて選択、矢印キー＝移動（Shift で大きく）、R＝回転、Delete＝削除、Ctrl/⌘+D＝複製、Ctrl/⌘+Z＝元に戻す、Esc＝選択を解除。
           </p>
         </div>
 
@@ -498,10 +655,10 @@ export function ClassroomEditor({
               <h3>{DESK_SPECS[selectedDesk.type].label}</h3>
               <p className="small">席番号：{selectedDesk.seats.join("・")}</p>
               <RotationControl value={selectedDesk.rotation} onChange={(rotation) => patchDesk(selectedDesk.id, { rotation })} />
-              <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(selectedDesk)} disabled={!faceTarget || selectedDesk.type === "round4"}>
+              <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(true)} disabled={!faceTarget || selectedDesk.type === "round4"}>
                 黒板の方を向く
               </button>
-              <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(selectedDesk, true)} disabled={!faceTarget || selectedDesk.type === "round4"}>
+              <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(true, true)} disabled={!faceTarget || selectedDesk.type === "round4"}>
                 黒板の中心に向ける
               </button>
               {selectedDesk.type === "custom" ? (
@@ -530,8 +687,37 @@ export function ClassroomEditor({
               </div>
               <ItemButtons onDuplicate={duplicateSelected} onDelete={removeSelected} />
             </>
+          ) : selectedCount > 1 ? (
+            <>
+              <h3>{selectedCount} 個を選択中</h3>
+              <p className="small">
+                机 {selectedDesks.length}（{selectedDesks.reduce((n, d) => n + d.seats.length, 0)} 席）・備品 {selectedFixtures.length}
+              </p>
+              <p className="small muted">どれかをドラッグすると、まとめて動きます。矢印キーでも動かせます。</p>
+              <div className="rotation">
+                <span className="field__label">それぞれを回転</span>
+                <div className="stack">
+                  <button type="button" className="button button--secondary button--small" onClick={() => rotateSelected(-5)} aria-label="選択中のものを左に5度回す">⟲ 5°</button>
+                  <button type="button" className="button button--secondary button--small" onClick={() => rotateSelected(5)} aria-label="選択中のものを右に5度回す">⟳ 5°</button>
+                </div>
+                <div className="stack">
+                  {[0, 90, 180, 270].map((deg) => (
+                    <button key={deg} type="button" className="button button--secondary button--small" onClick={() => rotateSelected(0, deg)}>{deg}°</button>
+                  ))}
+                </div>
+              </div>
+              <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(true)} disabled={!faceTarget || !selectedDesks.length}>
+                選んだ机を黒板に向ける
+              </button>
+              <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(true, true)} disabled={!faceTarget || !selectedDesks.length}>
+                選んだ机を黒板の中心に向ける
+              </button>
+              <ItemButtons onDuplicate={duplicateSelected} onDelete={removeSelected} />
+            </>
           ) : (
-            <p className="small muted">机や備品を押すと、ここで回転・向き・大きさを変えられます。</p>
+            <p className="small muted">
+              机や備品を押すと、ここで回転・向き・大きさを変えられます。何もないところからドラッグで囲むと、複数をまとめて選べます。
+            </p>
           )}
         </aside>
       </div>

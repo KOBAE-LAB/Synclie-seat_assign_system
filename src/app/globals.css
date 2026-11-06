@@ -1391,3 +1391,16 @@ rt {
   height: clamp(28px, 3vw, 44px);
   width: auto;
 }
+
+/* 教室エディタの範囲選択 */
+.marquee {
+  fill: rgba(128, 11, 22, 0.08);
+  stroke: var(--brand);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+.editor__selected {
+  color: var(--brand);
+  font-weight: 700;
+}
