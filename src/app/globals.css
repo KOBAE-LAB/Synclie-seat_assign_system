@@ -1538,3 +1538,9 @@ rt {
 .seat-dot--clickable:focus {
   outline: none;
 }
+
+.radio--sub {
+  margin-top: var(--space-3) !important;
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--line-soft);
+}

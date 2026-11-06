@@ -51,6 +51,11 @@ export function LectureForm({
           <input type="radio" name="seatFill" value="front" checked={fill === "front"} onChange={() => setFill("front")} />
           前から詰める（黒板に近い席から）
         </label>
+        <label className="radio">
+          前から{" "}
+          <input className="input input--tiny" type="number" name="skipFrontRows" min={0} max={30} defaultValue={0} aria-label="使わない列の数" />{" "}
+          列は使わない（予備席にする）
+        </label>
       </fieldset>
 
       <fieldset className="editor-panel">
@@ -66,9 +71,23 @@ export function LectureForm({
           グループに分ける
         </label>
         <label className="radio">
+          <input type="radio" name="groupMode" value="size" checked={mode === "size"} onChange={() => setMode("size")} />
+          <input className="input input--tiny" type="number" name="groupSize" min={1} max={50} defaultValue={4} disabled={mode !== "size"} aria-label="1 グループの人数" />{" "}
+          人ひと組（割り切れないときは{" "}
+          <input className="input input--tiny" type="number" name="groupAlt" min={1} max={50} defaultValue={3} disabled={mode !== "size"} aria-label="もう 1 つの人数（空なら使わない）" />{" "}
+          人ひと組も）
+        </label>
+        <label className="radio">
           <input type="radio" name="groupMode" value="none" checked={mode === "none"} onChange={() => setMode("none")} />
           グループなし
         </label>
+        <label className="radio radio--sub">
+          <input type="checkbox" name="spareNoGroup" defaultChecked />
+          予備席（使わない席）はグループなしにする
+        </label>
+        {mode === "size" ? (
+          <span className="field__hint">島ごとに、使用席を前の列の左から順に区切ります。例：50 人を 4 人か 3 人ひと組 → 4 人 × 11 組と 3 人 × 2 組。</span>
+        ) : null}
       </fieldset>
 
       <label className="field">

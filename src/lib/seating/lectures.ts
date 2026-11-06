@@ -165,6 +165,10 @@ export type CreateLectureInput = {
   groupMode: GroupMode;
   /** 使用席の選び方（省略時は全体に均等） */
   seatFill?: SeatFill;
+  /** 前から何列を使わない（予備席にする）か */
+  skipFrontRows?: number;
+  /** 予備席はグループなしにする */
+  spareNoGroup?: boolean;
 };
 
 export function createLecture(db: Db, teacherId: number, input: CreateLectureInput): number | null {
@@ -174,7 +178,10 @@ export function createLecture(db: Db, teacherId: number, input: CreateLectureInp
   if (!classroom) return null;
   const layout = parseLayout(classroom.layout_json);
   if (!layout || layout.seats.length === 0) return null;
-  const plan = planLecture(layout, input.enrolledCount, input.groupMode, input.seatFill ?? "even");
+  const plan = planLecture(layout, input.enrolledCount, input.groupMode, input.seatFill ?? "even", {
+    skipFrontRows: input.skipFrontRows ?? 0,
+    spareNoGroup: input.spareNoGroup ?? false,
+  });
 
   return db.transaction(() => {
     const lectureId = Number(

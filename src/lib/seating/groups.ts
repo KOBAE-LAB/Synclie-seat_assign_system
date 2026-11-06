@@ -1,5 +1,5 @@
 import type { Db } from "../db/index.ts";
-import { assignGroups, GROUP_COLORS, groupName, parseLayout, type GroupMode } from "./layout.ts";
+import { assignGroups, GROUP_COLORS, groupName, parseLayout, type GroupMode, type GroupOptions } from "./layout.ts";
 
 /**
  * 講義のグループ（作成後の追加・名前と色の変更・削除・席の割り当て・作り直し）。
@@ -91,7 +91,13 @@ export function assignSeatsToGroup(
 }
 
 /** グループをすべて作り直す（島ごと／席番号順に N 個／なし）。使用席・予備席はそのまま */
-export function regroupLecture(db: Db, teacherId: number, lectureId: number, mode: GroupMode): GroupResult {
+export function regroupLecture(
+  db: Db,
+  teacherId: number,
+  lectureId: number,
+  mode: GroupMode,
+  options: GroupOptions = {},
+): GroupResult {
   const row = db
     .prepare("SELECT layout_json FROM lectures WHERE id = ? AND owner_teacher_id = ?")
     .get(lectureId, teacherId) as { layout_json: string } | undefined;
@@ -104,7 +110,7 @@ export function regroupLecture(db: Db, teacherId: number, lectureId: number, mod
       }[]
     ).map((r) => r.seat_number),
   );
-  const { groups, groupOf } = assignGroups(layout, used, mode);
+  const { groups, groupOf } = assignGroups(layout, used, mode, options);
   db.transaction(() => {
     db.prepare("UPDATE lecture_seats SET group_id = NULL WHERE lecture_id = ?").run(lectureId);
     db.prepare("DELETE FROM lecture_groups WHERE lecture_id = ?").run(lectureId);
