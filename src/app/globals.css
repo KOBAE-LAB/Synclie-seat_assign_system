@@ -1443,3 +1443,98 @@ rt {
   stroke: var(--brand);
   stroke-width: 4;
 }
+
+/* 講義画面の座席図の操作 */
+.mode-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.mode-switch__button {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid #cccccc;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mode-switch__button + .mode-switch__button {
+  border-left: none;
+}
+.mode-switch__button:first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+.mode-switch__button:last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+.mode-switch__button--active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #ffffff;
+}
+.group-panel {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  background: #fafafa;
+}
+.group-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+}
+.group-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-input);
+  border: 1px solid transparent;
+}
+.group-row--active {
+  background: var(--brand-tint);
+  border-color: var(--brand);
+}
+.group-row__brush {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.group-row__color {
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #cccccc;
+  border-radius: var(--radius-input);
+  background: none;
+  cursor: pointer;
+}
+.group-row__name {
+  padding: 0.3rem 0.6rem;
+}
+.group-row__none {
+  font-weight: 600;
+  min-width: 12em;
+}
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.regroup summary {
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* マウスで押したときの四角い枠は出さない（キーボード操作時は丸の色で示す） */
+.seat-dot--clickable:focus {
+  outline: none;
+}

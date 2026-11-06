@@ -32,6 +32,7 @@ import {
   type AcceptState,
 } from "@/lib/seating/lectures";
 import { cancelDraw, moveDraw, proxyDraw, resetDraws } from "@/lib/seating/draws";
+import { addGroup, assignSeatsToGroup, deleteGroup, regroupLecture, updateGroup } from "@/lib/seating/groups";
 import { addFurigana } from "@/lib/i18n/furigana";
 import { isTranslationAvailable, translateToEnglish } from "@/lib/i18n/translate";
 
@@ -271,4 +272,46 @@ export async function copyClassroomAction(_prev: ActionState, formData: FormData
   const id = copyClassroomByShareCode(getDb(), teacher.teacherId, field(formData, "code"));
   if (!id) return { error: "共有コードが違うか、無効にされています。" };
   redirect(`/teacher/classrooms/${id}?copied=1`);
+}
+
+// ---------- 講義のグループ編集（講義画面の座席図から。画面は呼び出し側で更新する） ----------
+
+export async function addGroupAction(lectureId: number): Promise<ActionState> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned) return { error: BAD_ORIGIN };
+  return addGroup(getDb(), owned.teacher.teacherId, lectureId) ? {} : { error: "これ以上グループを増やせません（50 まで）。" };
+}
+
+export async function updateGroupAction(lectureId: number, groupId: number, name: string, color: string): Promise<ActionState> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned) return { error: BAD_ORIGIN };
+  if (typeof name !== "string" || typeof color !== "string") return { error: "入力が正しくありません。" };
+  const r = updateGroup(getDb(), owned.teacher.teacherId, lectureId, groupId, { name, color });
+  return r.ok ? {} : { error: r.error };
+}
+
+export async function deleteGroupAction(lectureId: number, groupId: number): Promise<ActionState> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned) return { error: BAD_ORIGIN };
+  return deleteGroup(getDb(), owned.teacher.teacherId, lectureId, groupId) ? {} : { error: "グループが見つかりません。" };
+}
+
+export async function assignSeatGroupAction(lectureId: number, seatNumbers: number[], groupId: number | null): Promise<ActionState> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned) return { error: BAD_ORIGIN };
+  if (!Array.isArray(seatNumbers) || seatNumbers.length > 300) return { error: "入力が正しくありません。" };
+  const changed = assignSeatsToGroup(getDb(), owned.teacher.teacherId, lectureId, seatNumbers, groupId);
+  return changed ? {} : { error: "変更できませんでした。" };
+}
+
+export async function regroupAction(lectureId: number, kind: string, count: number): Promise<ActionState> {
+  const owned = await ownedLecture(lectureId);
+  if (!owned) return { error: BAD_ORIGIN };
+  let mode: GroupMode;
+  if (kind === "island") mode = { kind: "island" };
+  else if (kind === "none") mode = { kind: "none" };
+  else if (kind === "count" && Number.isInteger(count) && count >= 1 && count <= 50) mode = { kind: "count", count };
+  else return { error: "グループ数は 1〜50 の整数で入力してください。" };
+  const r = regroupLecture(getDb(), owned.teacher.teacherId, lectureId, mode);
+  return r.ok ? {} : { error: r.error };
 }

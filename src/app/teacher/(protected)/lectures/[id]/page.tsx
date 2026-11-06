@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { AutoRefresh } from "@/components/seating/AutoRefresh";
 import { ConfirmButton } from "@/components/seating/ConfirmButton";
-import { SeatStatusEditor } from "@/components/seating/SeatStatusEditor";
+import { LectureSeatEditor } from "@/components/seating/LectureSeatEditor";
 import {
   cancelDrawAction,
   deleteLectureAction,
@@ -115,16 +115,12 @@ export default async function LecturePage({
       <section className="card">
         <h2>座席図</h2>
         <p className="small muted">丸の色＝グループ、点線の丸＝予備席、塗りつぶし＝抽選済み、▲＝机の向き（5 秒ごとに自動更新）</p>
-        <SeatStatusEditor
+        <LectureSeatEditor
           lectureId={lecture.id}
           layout={lecture.layout}
-          seats={lecture.seats.map((s) => ({
-            number: s.number,
-            color: s.groupColor,
-            taken: takenNumbers.has(s.number),
-            spare: s.status === "spare",
-            label: s.groupName,
-          }))}
+          seats={lecture.seats}
+          groups={lecture.groups}
+          takenNumbers={[...takenNumbers]}
         />
         {lecture.groups.length ? (
           <ul className="legend">
