@@ -4,6 +4,7 @@
  * 回転 0° のとき、机の「前」は上（-y 方向）を向き、座席は机の後ろ（+y 側）にある。
  */
 
+// tablet はテーブル付き椅子（袖付き椅子）。保存済みデータとの互換のため内部名は変えない
 export type DeskType = "student" | "tablet" | "long2" | "trapezoid3" | "round4" | "custom";
 export type FixtureType = "board" | "podium" | "screen" | "door" | "window" | "pillar" | "other";
 
@@ -68,7 +69,7 @@ export const DESK_SPECS: Record<DeskType, DeskSpec> = {
     seatOffsets: () => [{ x: 0, y: 42 }],
   },
   tablet: {
-    label: "タブレット付き椅子",
+    label: "テーブル付き椅子",
     seatCount: 1,
     outline: () => ({ kind: "polygon", points: [{ x: -10, y: -28 }, { x: 30, y: -28 }, { x: 30, y: -6 }, { x: -10, y: -6 }] }),
     seatOffsets: () => [{ x: 0, y: 6 }],
