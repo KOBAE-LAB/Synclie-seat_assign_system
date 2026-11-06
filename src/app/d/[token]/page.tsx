@@ -16,7 +16,7 @@ export default async function StudentDrawPage({ params }: { params: Promise<{ to
       <StudentDraw
         token={token}
         lectureName={lecture.name}
-        message={lecture.messageJa}
+        message={{ ja: lecture.messageJa, furigana: lecture.messageFurigana, en: lecture.messageEn }}
         initialState={lecture.acceptState}
         layout={lecture.layout}
         seats={lecture.seats.map((s) => ({ number: s.number, color: s.groupColor, label: s.groupName }))}

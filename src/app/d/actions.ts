@@ -5,12 +5,14 @@ import { clientIp } from "@/lib/auth/server";
 import { RateLimiter } from "@/lib/auth/rate-limit";
 import { drawForDevice, findDeviceDraw, isValidDeviceId, type DrawResult } from "@/lib/seating/draws";
 import type { AcceptState } from "@/lib/seating/lectures";
+import type { StudentErrorCode } from "@/lib/i18n/student-text";
 
 export type StudentStatus = {
   found: boolean;
   acceptState: AcceptState | null;
   result: DrawResult | null;
-  error?: string;
+  /** 文言は画面側で言語に合わせて出す */
+  error?: StudentErrorCode;
 };
 
 const globalForDraw = globalThis as unknown as { __seatAssignDrawLimiter?: RateLimiter };
@@ -36,10 +38,10 @@ export async function checkStatusAction(token: string, deviceId: string): Promis
 
 export async function drawAction(token: string, deviceId: string): Promise<StudentStatus> {
   if (typeof token !== "string" || typeof deviceId !== "string" || !isValidDeviceId(deviceId)) {
-    return { found: false, acceptState: null, result: null, error: "ページを再読み込みしてください。" };
+    return { found: false, acceptState: null, result: null, error: "reload" };
   }
   if (!drawLimiter.consume(await clientIp())) {
-    return { found: true, acceptState: null, result: null, error: "混み合っています。数秒待ってからもう一度押してください。" };
+    return { found: true, acceptState: null, result: null, error: "busy" };
   }
   const outcome = drawForDevice(getDb(), token, deviceId);
   const state = lectureState(token);
@@ -47,10 +49,5 @@ export async function drawAction(token: string, deviceId: string): Promise<Stude
     const { drawId, seatNumber, groupName, groupColor } = outcome;
     return { found: true, acceptState: state?.acceptState ?? null, result: { drawId, seatNumber, groupName, groupColor } };
   }
-  const messages = {
-    not_found: "この講義は見つかりません。",
-    not_open: "いまは抽選を受け付けていません。",
-    full: "空いている席がありません。講師に知らせてください。",
-  } as const;
-  return { found: outcome.reason !== "not_found", acceptState: state?.acceptState ?? null, result: null, error: messages[outcome.reason] };
+  return { found: outcome.reason !== "not_found", acceptState: state?.acceptState ?? null, result: null, error: outcome.reason };
 }

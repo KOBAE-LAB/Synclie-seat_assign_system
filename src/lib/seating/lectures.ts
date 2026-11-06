@@ -35,6 +35,9 @@ export type Lecture = {
   lectureDate: string | null;
   enrolledCount: number;
   messageJa: string;
+  messageFurigana: string;
+  messageEn: string;
+  memo: string;
   acceptState: AcceptState;
   publicToken: string;
   classroomName: string;
@@ -70,6 +73,8 @@ export type CreateLectureInput = {
   lectureDate: string | null;
   enrolledCount: number;
   messageJa: string;
+  messageFurigana?: string;
+  messageEn?: string;
   groupMode: GroupMode;
 };
 
@@ -87,8 +92,8 @@ export function createLecture(db: Db, teacherId: number, input: CreateLectureInp
       db
         .prepare(
           `INSERT INTO lectures (owner_teacher_id, classroom_id, name, lecture_date, enrolled_count,
-                                 message_ja, public_token, layout_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                                 message_ja, message_furigana, message_en, public_token, layout_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           teacherId,
@@ -97,6 +102,8 @@ export function createLecture(db: Db, teacherId: number, input: CreateLectureInp
           input.lectureDate,
           input.enrolledCount,
           input.messageJa,
+          input.messageFurigana ?? "",
+          input.messageEn ?? "",
           generatePublicToken(),
           JSON.stringify(layout),
         ).lastInsertRowid,
@@ -123,6 +130,9 @@ type LectureRow = {
   lecture_date: string | null;
   enrolled_count: number;
   message_ja: string;
+  message_furigana: string;
+  message_en: string;
+  memo: string;
   accept_state: AcceptState;
   public_token: string;
   layout_json: string;
@@ -150,6 +160,9 @@ function loadLecture(db: Db, row: LectureRow | undefined): Lecture | null {
     lectureDate: row.lecture_date,
     enrolledCount: row.enrolled_count,
     messageJa: row.message_ja,
+    messageFurigana: row.message_furigana,
+    messageEn: row.message_en,
+    memo: row.memo,
     acceptState: row.accept_state,
     publicToken: row.public_token,
     classroomName: row.classroom_name,
@@ -160,7 +173,7 @@ function loadLecture(db: Db, row: LectureRow | undefined): Lecture | null {
 }
 
 const LECTURE_SELECT = `
-  SELECT l.id, l.name, l.lecture_date, l.enrolled_count, l.message_ja, l.accept_state,
+  SELECT l.id, l.name, l.lecture_date, l.enrolled_count, l.message_ja, l.message_furigana, l.message_en, l.memo, l.accept_state,
          l.public_token, l.layout_json, c.name AS classroom_name
     FROM lectures l JOIN classrooms c ON c.id = l.classroom_id`;
 
@@ -210,4 +223,26 @@ export function toggleSeatStatus(db: Db, teacherId: number, lectureId: number, s
   const next = row.status === "used" ? "spare" : "used";
   db.prepare("UPDATE lecture_seats SET status = ? WHERE id = ?").run(next, row.id);
   return next;
+}
+
+export type LectureInfoInput = {
+  name: string;
+  lectureDate: string | null;
+  messageJa: string;
+  messageFurigana: string;
+  messageEn: string;
+};
+
+/** 講義名・日付・メッセージを更新する（座席・グループは変えない） */
+export function updateLectureInfo(db: Db, teacherId: number, id: number, input: LectureInfoInput): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE lectures SET name = ?, lecture_date = ?, message_ja = ?, message_furigana = ?, message_en = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ? AND owner_teacher_id = ?`,
+      )
+      .run(input.name, input.lectureDate, input.messageJa, input.messageFurigana, input.messageEn, id, teacherId)
+      .changes > 0
+  );
 }

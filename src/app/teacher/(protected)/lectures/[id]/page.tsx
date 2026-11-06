@@ -26,7 +26,7 @@ export default async function LecturePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ proxy?: string; group?: string; error?: string; moved?: string; to?: string }>;
+  searchParams: Promise<{ proxy?: string; group?: string; error?: string; moved?: string; to?: string; saved?: string }>;
 }) {
   const teacher = await requireTeacher();
   const { id } = await params;
@@ -54,8 +54,12 @@ export default async function LecturePage({
               {lecture.lectureDate ?? "日付なし"}・{lecture.classroomName}・受講者 {lecture.enrolledCount} 人（使用席 {usedCount} / 全 {lecture.seats.length} 席）
             </p>
           </div>
-          <span className={`state state--${lecture.acceptState} state--large`}>{STATE_LABEL[lecture.acceptState]}</span>
+          <div className="stack" style={{ alignItems: "center" }}>
+            <Link href={`/teacher/lectures/${lecture.id}/edit`} className="button button--secondary button--small">講義の設定・メッセージ</Link>
+            <span className={`state state--${lecture.acceptState} state--large`}>{STATE_LABEL[lecture.acceptState]}</span>
+          </div>
         </div>
+        {query.saved === "info" ? <p className="notice" role="status">講義の設定を保存しました。</p> : null}
 
         <div className="lecture-top">
           <div>
