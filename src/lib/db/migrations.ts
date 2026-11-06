@@ -147,4 +147,13 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX idx_teacher_sessions_expires ON teacher_sessions (expires_at);
     `,
   },
+  {
+    version: 3,
+    name: "lecture_layout_snapshot",
+    sql: /* sql */ `
+      -- 講義作成時の教室レイアウトを保存する（作成後に教室を編集しても講義の座席図は変わらない）
+      ALTER TABLE lectures ADD COLUMN layout_json TEXT NOT NULL DEFAULT '{}'
+        CHECK (json_valid(layout_json));
+    `,
+  },
 ];
