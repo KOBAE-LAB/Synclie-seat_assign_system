@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test \"tests/**/*.test.ts\"",
-    "db:migrate": "node --experimental-strip-types scripts/migrate.ts"
+    "db:migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "purge:inactive": "node --experimental-strip-types scripts/purge-inactive.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

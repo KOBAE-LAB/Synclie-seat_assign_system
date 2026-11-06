@@ -81,6 +81,7 @@ DB ファイルは `SEAT_ASSIGN_DB_PATH`（既定 `./data/seat-assign.db`）に�
 | `npm run typecheck` | TypeScript 型チェック |
 | `npm test` | テスト（Node.js 標準のテストランナー。スキーマ・講師認証） |
 | `npm run db:migrate` | マイグレーションを手動適用 |
+| `npm run purge:inactive` | 2 年間使われていないアカウントを今すぐ削除 |
 
 ## ディレクトリ構成
 
@@ -133,7 +134,8 @@ deploy/                  systemd ユニット・nginx 設定・自動更新ス�
 - IP アドレスごとのレート制限（ログイン・再設定 10 分に 20 回、アカウント作成 1 時間に 10 件、ID の空き確認 1 分に 60 回）。プロセス内メモリで数えるため、再起動でリセットされます
 - セッションは SQLite の `teacher_sessions` に保存し、Cookie（本番は `__Host-seat_assign_session`、httpOnly・Secure・SameSite=Lax、`SESSION_SECRET` で HMAC 署名）にはトークンだけを入れます。有効期限は 30 日
 - フォームはすべて Server Actions で送信し、Next.js 標準の Origin / Host 照合に加えて、アプリ側でも Origin を確認しています（CSRF 対策）
-- 最後のログインから 2 年たったアカウントは自動削除する予定です（削除ジョブは未実装）
+- 最後のログインから 2 年（730 日）たったアカウントは、教室・講義・抽選結果ごと自動で削除します（アプリが起動 30 秒後と 6 時間ごとに実行。`SEAT_ASSIGN_DISABLE_PURGE=1` で止められる。手動で実行するときは `npm run purge:inactive`）
+- 「アカウント設定」（`/teacher/account`）で、パスワードの変更（ほかの端末はログアウト）、復元コードの再発行、アカウントの削除ができます
 
 ## デプロイ（さくら VPS / Ubuntu）
 
