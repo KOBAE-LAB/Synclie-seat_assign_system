@@ -8,7 +8,9 @@ import { SeatStatusEditor } from "@/components/seating/SeatStatusEditor";
 import {
   cancelDrawAction,
   deleteLectureAction,
+  issueTtCodeAction,
   moveDrawAction,
+  revokeTtCodeAction,
   proxyDrawAction,
   resetDrawsAction,
   setAcceptStateAction,
@@ -16,8 +18,8 @@ import {
 import { requireTeacher } from "@/lib/auth/server";
 import { getDb } from "@/lib/db";
 import { listDraws } from "@/lib/seating/draws";
-import { getLecture, STATE_LABEL } from "@/lib/seating/lectures";
-import { studentUrl } from "@/lib/seating/url";
+import { formatTtCode, getLecture, getTtCode, STATE_LABEL } from "@/lib/seating/lectures";
+import { publicBaseUrl, studentUrl } from "@/lib/seating/url";
 
 export const metadata: Metadata = { title: "講義" };
 
@@ -36,6 +38,8 @@ export default async function LecturePage({
   if (!lecture) notFound();
 
   const draws = listDraws(db, lecture.id);
+  const ttCode = getTtCode(db, teacher.teacherId, lecture.id);
+  const ttUrl = `${await publicBaseUrl()}/tt`;
   const takenNumbers = new Set(draws.map((d) => d.seatNumber));
   const usedCount = lecture.seats.filter((s) => s.status === "used").length;
   const url = await studentUrl(lecture.publicToken);
@@ -168,6 +172,30 @@ export default async function LecturePage({
               ))}
             </tbody>
           </table>
+        )}
+      </section>
+
+      <section className="card" id="tt">
+        <h2>TT・参観コード</h2>
+        <p className="small muted">
+          TT の講師や参観者に渡すと、{ttUrl} でこの講義の抽選状況と座席図を閲覧できます（操作はできません）。再発行すると前のコードは使えなくなります。
+        </p>
+        {ttCode ? (
+          <>
+            <p className="tt-code">{formatTtCode(ttCode)}</p>
+            <div className="stack">
+              <form action={issueTtCodeAction.bind(null, lecture.id)}>
+                <ConfirmButton message="コードを再発行します。今のコードは使えなくなります。よろしいですか？">再発行</ConfirmButton>
+              </form>
+              <form action={revokeTtCodeAction.bind(null, lecture.id)}>
+                <ConfirmButton message="コードを無効にします。閲覧中の人も見られなくなります。よろしいですか？">無効にする</ConfirmButton>
+              </form>
+            </div>
+          </>
+        ) : (
+          <form action={issueTtCodeAction.bind(null, lecture.id)}>
+            <button type="submit" className="button button--secondary">コードを発行する</button>
+          </form>
         )}
       </section>
 

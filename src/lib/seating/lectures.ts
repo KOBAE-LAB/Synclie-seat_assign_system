@@ -246,3 +246,64 @@ export function updateLectureInfo(db: Db, teacherId: number, id: number, input: 
       .changes > 0
   );
 }
+
+// ---------- TT・参観コード（閲覧専用） ----------
+
+/** 見間違えやすい文字を除いた 31 文字 */
+const TT_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const TT_CODE_LENGTH = 8; // 約 40 ビット（入力回数はレート制限で抑える）
+
+export function generateTtCode(): string {
+  let s = "";
+  for (let i = 0; i < TT_CODE_LENGTH; i++) s += TT_ALPHABET[crypto.randomInt(TT_ALPHABET.length)];
+  return s;
+}
+
+/** 入力を正規化（大文字小文字・ハイフン・空白・全角を問わない）。形式が違えば null */
+export function normalizeTtCode(input: string): string | null {
+  const s = input.normalize("NFKC").replace(/[\s\-‐‑‒–—―ー－]/g, "").toUpperCase();
+  return new RegExp(`^[${TT_ALPHABET}]{${TT_CODE_LENGTH}}$`).test(s) ? s : null;
+}
+
+/** 表示用：XXXX-XXXX */
+export function formatTtCode(code: string): string {
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/** TT・参観コードを発行（再発行で前のコードは使えなくなる） */
+export function issueTtCode(db: Db, teacherId: number, lectureId: number): string | null {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateTtCode();
+    try {
+      const res = db
+        .prepare("UPDATE lectures SET tt_code = ? WHERE id = ? AND owner_teacher_id = ?")
+        .run(code, lectureId, teacherId);
+      return res.changes ? code : null;
+    } catch (e) {
+      // まれにほかの講義と重なったら作り直す
+      if (!(e instanceof Error && /UNIQUE/.test(e.message))) throw e;
+    }
+  }
+  return null;
+}
+
+export function revokeTtCode(db: Db, teacherId: number, lectureId: number): boolean {
+  return (
+    db.prepare("UPDATE lectures SET tt_code = NULL WHERE id = ? AND owner_teacher_id = ?").run(lectureId, teacherId)
+      .changes > 0
+  );
+}
+
+export function getTtCode(db: Db, teacherId: number, lectureId: number): string | null {
+  const row = db
+    .prepare("SELECT tt_code FROM lectures WHERE id = ? AND owner_teacher_id = ?")
+    .get(lectureId, teacherId) as { tt_code: string | null } | undefined;
+  return row?.tt_code ?? null;
+}
+
+export function getLectureByTtCode(db: Db, code: string): Lecture | null {
+  return loadLecture(
+    db,
+    db.prepare(`${LECTURE_SELECT} WHERE l.tt_code = ? AND l.archived = 0`).get(code) as LectureRow | undefined,
+  );
+}

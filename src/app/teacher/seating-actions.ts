@@ -12,6 +12,8 @@ import {
   getLecture,
   MESSAGE_MAX,
   setAcceptState,
+  issueTtCode,
+  revokeTtCode,
   toggleSeatStatus,
   updateLectureInfo,
   type AcceptState,
@@ -207,4 +209,16 @@ export async function updateLectureAction(lectureId: number, _prev: ActionState,
     messageEn: messageJa ? messageEn : "",
   });
   redirect(`/teacher/lectures/${lectureId}?saved=info`);
+}
+
+export async function issueTtCodeAction(lectureId: number): Promise<void> {
+  const owned = await ownedLecture(lectureId);
+  if (owned) issueTtCode(getDb(), owned.teacher.teacherId, lectureId);
+  redirect(`/teacher/lectures/${lectureId}#tt`);
+}
+
+export async function revokeTtCodeAction(lectureId: number): Promise<void> {
+  const owned = await ownedLecture(lectureId);
+  if (owned) revokeTtCode(getDb(), owned.teacher.teacherId, lectureId);
+  redirect(`/teacher/lectures/${lectureId}#tt`);
 }
