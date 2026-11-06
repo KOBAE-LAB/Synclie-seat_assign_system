@@ -1544,3 +1544,14 @@ rt {
   padding-top: var(--space-2);
   border-top: 1px dashed var(--line-soft);
 }
+
+/* グループの囲みと名前の札 */
+.group-badge text {
+  font-size: 20px;
+  font-weight: 800;
+  fill: #ffffff;
+  pointer-events: none;
+}
+.group-outlines {
+  pointer-events: none;
+}

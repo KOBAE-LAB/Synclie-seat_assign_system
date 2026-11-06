@@ -50,6 +50,7 @@ import {
 } from "../src/lib/seating/lectures.ts";
 import { cancelDraw, drawForDevice, listDraws, moveDraw, proxyDraw, resetDraws } from "../src/lib/seating/draws.ts";
 import { addGroup, assignSeatsToGroup, deleteGroup, regroupLecture, updateGroup } from "../src/lib/seating/groups.ts";
+import { groupOutlines, minimumSpanningEdges } from "../src/lib/seating/group-outline.ts";
 
 /** 旧形式（マス目）の JSON：cols 列のうち 4 列目ごとが通路 */
 function oldGridJson(rows: number, cols: number) {
@@ -578,4 +579,25 @@ test("50 人・1 列目は使わない・前から詰める・4 人か 3 人ひ�
   const island = planLecture(layout80, 50, { kind: "island" }, "front", { spareNoGroup: true });
   assert.ok(island.seats.filter((s) => s.status === "spare").every((s) => s.groupIndex === null));
   assert.ok(island.seats.filter((s) => s.status === "used").every((s) => s.groupIndex !== null));
+});
+
+test("グループの囲み：同じグループの席だけを最短でつなぐ", () => {
+  // 2 × 2 の 4 人組と、その右隣の別グループ 1 人
+  const seats = [
+    { x: 0, y: 0, name: "A", color: "#111111" },
+    { x: 60, y: 0, name: "A", color: "#111111" },
+    { x: 0, y: 100, name: "A", color: "#111111" },
+    { x: 60, y: 100, name: "A", color: "#111111" },
+    { x: 120, y: 0, name: "B", color: "#222222" },
+    { x: 200, y: 0, name: null, color: null },
+  ];
+  const outlines = groupOutlines(seats, 24);
+  assert.equal(outlines.length, 2, "グループなしの席は囲まない");
+  const a = outlines.find((o) => o.name === "A")!;
+  assert.equal(a.edges.length, 3, "4 点を 3 本の辺でつなぐ");
+  const total = a.edges.reduce((sum, [i, j]) => sum + Math.hypot(a.points[i].x - a.points[j].x, a.points[i].y - a.points[j].y), 0);
+  assert.equal(total, 60 + 60 + 100, "最短（横 2 本＋縦 1 本）");
+  assert.deepEqual(a.badge, { x: -24, y: -24 }, "札はいちばん前・左の席の左上");
+  assert.equal(outlines.find((o) => o.name === "B")!.edges.length, 0);
+  assert.deepEqual(minimumSpanningEdges([{ x: 0, y: 0 }]), []);
 });
