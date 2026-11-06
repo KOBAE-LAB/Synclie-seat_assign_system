@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { Db } from "../db/index.ts";
-import { parseLayout, planLecture, type ClassroomLayout, type GroupMode } from "./layout.ts";
+import { parseLayout, planLecture, type ClassroomLayout, type GroupMode, type SeatFill } from "./layout.ts";
 
 export type AcceptState = "before" | "open" | "closed";
 
@@ -163,6 +163,8 @@ export type CreateLectureInput = {
   messageFurigana?: string;
   messageEn?: string;
   groupMode: GroupMode;
+  /** 使用席の選び方（省略時は全体に均等） */
+  seatFill?: SeatFill;
 };
 
 export function createLecture(db: Db, teacherId: number, input: CreateLectureInput): number | null {
@@ -172,7 +174,7 @@ export function createLecture(db: Db, teacherId: number, input: CreateLectureInp
   if (!classroom) return null;
   const layout = parseLayout(classroom.layout_json);
   if (!layout || layout.seats.length === 0) return null;
-  const plan = planLecture(layout, input.enrolledCount, input.groupMode);
+  const plan = planLecture(layout, input.enrolledCount, input.groupMode, input.seatFill ?? "even");
 
   return db.transaction(() => {
     const lectureId = Number(

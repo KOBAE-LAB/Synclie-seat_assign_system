@@ -11,6 +11,7 @@ export function LectureForm({
   const [state, formAction, pending] = useActionState<ActionState, FormData>(createLectureAction, {});
   const [classroomId, setClassroomId] = useState(classrooms[0]?.id ?? 0);
   const [mode, setMode] = useState("island");
+  const [fill, setFill] = useState<"even" | "front">("even");
   const seatCount = classrooms.find((c) => c.id === classroomId)?.seatCount ?? 0;
   const today = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD
 
@@ -36,9 +37,21 @@ export function LectureForm({
         <span className="field__label">受講者数</span>
         <input className="input input--narrow" type="number" name="enrolledCount" min={1} max={150} required defaultValue={Math.min(seatCount, 40) || 1} />
         <span className="field__hint">
-          受講者数ぶんの席を、島ごとに均等に「使用席」にします（この教室は {seatCount} 席）。残りは予備席になり、使用席が埋まると予備席から割り当てます。
+          この教室は {seatCount} 席です。受講者数ぶんの席を「使用席」にし、残りは予備席になります（使用席が埋まると予備席から割り当てます）。
         </span>
       </label>
+
+      <fieldset className="editor-panel">
+        <legend>使用席の選び方</legend>
+        <label className="radio">
+          <input type="radio" name="seatFill" value="even" checked={fill === "even"} onChange={() => setFill("even")} />
+          全体に均等に（島ごとに散らす）
+        </label>
+        <label className="radio">
+          <input type="radio" name="seatFill" value="front" checked={fill === "front"} onChange={() => setFill("front")} />
+          前から詰める（黒板に近い席から）
+        </label>
+      </fieldset>
 
       <fieldset className="editor-panel">
         <legend>グループ</legend>
