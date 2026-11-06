@@ -27,6 +27,7 @@ import {
   ROOM_MAX,
   ROOM_MIN,
   contentExtent,
+  resizeRoom,
   SEAT_MAX,
   withSeats,
   type ClassroomLayout,
@@ -358,10 +359,11 @@ export function ClassroomEditor({
 
   /** 部屋の大きさの入力を確定する（入力中は反映せず、欄を離れたときに反映。中身より小さくはしない） */
   function commitRoomSize(key: "width" | "height", text: string) {
-    const need = contentExtent(room)[key];
-    const n = clamp(toInt(text, room[key]), Math.max(ROOM_MIN, need), ROOM_MAX);
-    if (n !== room[key]) update((r) => ({ ...r, [key]: n }));
-    if (toInt(text, n) < need) setNotice(`机や備品が収まるよう、${key === "width" ? "幅" : "奥行き"}は ${need} cm 以上にしました。`);
+    const n = clamp(toInt(text, room[key]), ROOM_MIN, ROOM_MAX);
+    if (n === room[key]) return;
+    const { layout: next, moved } = resizeRoom(room, key === "width" ? n : room.width, key === "height" ? n : room.height);
+    update(() => next);
+    setNotice(moved ? `部屋からはみ出す ${moved} 個の机・備品を、新しい壁ぎわに寄せました。` : "");
   }
 
   // ---- ドラッグ ----

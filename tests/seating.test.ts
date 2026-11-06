@@ -8,6 +8,7 @@ import {
   contentExtent,
   emptyLayout,
   findIslands,
+  resizeRoom,
   groupName,
   parseLayout,
   planLecture,
@@ -98,12 +99,42 @@ test("机が部屋からはみ出していたら、拒否せず部屋を広げ�
   const shrunk = { ...withSeats({ ...emptyLayout(1000, 800), desks }), width: 200, height: 200 };
   const r = validateLayout(JSON.stringify(shrunk));
   assert.ok(r.ok);
-  assert.ok(r.layout.width >= 700 && r.layout.height >= 700, `広がった: ${r.layout.width}x${r.layout.height}`);
+  const maxX = Math.max(...desks.map((d) => d.x));
+  const maxY = Math.max(...desks.map((d) => d.y));
+  assert.equal(r.layout.width, maxX, "机の中心が入るところまで広がる（余白は足さない）");
+  assert.equal(r.layout.height, maxY);
   assert.equal(r.layout.seats.length, 48);
   const extent = contentExtent(r.layout);
   assert.ok(extent.width <= r.layout.width && extent.height <= r.layout.height);
   // 大きい部屋はそのまま
   assert.equal(validateLayout(JSON.stringify({ ...shrunk, width: 1500, height: 1200 })).ok && 1500, 1500);
+});
+
+test("壁ぎわの備品があっても、保存するたびに部屋が広がらない", () => {
+  const room = emptyLayout(760, 800);
+  const withDoor = withSeats({
+    ...room,
+    fixtures: [...room.fixtures, { id: "door", type: "door", x: 760, y: 700, w: 90, h: 10, rotation: 90 }],
+  });
+  let l = withDoor;
+  for (let i = 0; i < 3; i++) l = validateLayout(JSON.stringify(l)).ok ? (validateLayout(JSON.stringify(l)) as { layout: typeof l }).layout : l;
+  assert.equal(l.width, 760);
+  assert.equal(l.height, 800);
+});
+
+test("部屋を小さくすると、はみ出す机・備品を新しい壁ぎわに寄せる", () => {
+  const room = emptyLayout(805, 800);
+  const l = withSeats({
+    ...room,
+    desks: [{ id: "a", type: "student", x: 780, y: 300, rotation: 0, seats: [1] }],
+    fixtures: [...room.fixtures, { id: "door", type: "door", x: 805, y: 700, w: 90, h: 10, rotation: 90 }],
+  });
+  const { layout, moved } = resizeRoom(l, 700, 800);
+  assert.equal(moved, 2);
+  assert.equal(layout.width, 700);
+  assert.equal(layout.fixtures.find((f) => f.id === "door")!.x, 700);
+  assert.equal(layout.desks[0].x, 700);
+  assert.equal(resizeRoom(l, 1000, 800).moved, 0, "広げるときは何も動かさない");
 });
 
 test("保存できない理由を具体的に返す", () => {
