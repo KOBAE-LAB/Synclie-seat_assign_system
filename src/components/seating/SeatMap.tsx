@@ -69,54 +69,20 @@ export function SeatMap({
     }
   }
   const labeledDeskIds = new Set([...labelDesk.values()].map((d) => d.id));
+  // 同じページに座席図が複数あってもマスクの ID が重ならないように（表示内容から決まる値）
+  const maskPrefix = `gm-${size}-${layout.seats.length}-${outlines.length}`;
   return (
     <div className={`seat-map seat-map--${size}`}>
       <svg viewBox={contentViewBox(layout)} className="seat-map__svg" role="img" aria-label="座席図">
         {layout.fixtures.map((f) => (
           <FixtureShape key={f.id} fixture={f} />
         ))}
-        {/* グループの囲み：外側（色・太め）→ 内側（白）を重ねて、つながった形の縁取りにする */}
+        {/* グループのうっすらした塗り（机の下） */}
         {outlines.length ? (
           <g className="group-outlines" aria-hidden="true">
             {outlines.map((g) => (
-              <g key={`o-${g.key}`} opacity={mineKey && g.key !== mineKey ? 0.35 : 1}>
-                {g.points.map((p, i) => (
-                  <circle key={i} cx={p.x} cy={p.y} r={GROUP_RADIUS + GROUP_LINE} fill={g.color} />
-                ))}
-                {g.edges.map(([a, b], i) => (
-                  <line key={`e${i}`} x1={g.points[a].x} y1={g.points[a].y} x2={g.points[b].x} y2={g.points[b].y}
-                    stroke={g.color} strokeWidth={(GROUP_RADIUS + GROUP_LINE) * 2} strokeLinecap="round" />
-                ))}
-                {(desksByGroup.get(g.key) ?? []).map((d) => (
-                  <DeskBlock key={d.id} desk={d} color={g.color} pad={DESK_PAD + GROUP_LINE} />
-                ))}
-              </g>
-            ))}
-            {outlines.map((g) => (
-              <g key={`i-${g.key}`}>
-                {g.points.map((p, i) => (
-                  <circle key={i} cx={p.x} cy={p.y} r={GROUP_RADIUS} fill="#ffffff" />
-                ))}
-                {g.edges.map(([a, b], i) => (
-                  <line key={`e${i}`} x1={g.points[a].x} y1={g.points[a].y} x2={g.points[b].x} y2={g.points[b].y}
-                    stroke="#ffffff" strokeWidth={GROUP_RADIUS * 2} strokeLinecap="round" />
-                ))}
-                {(desksByGroup.get(g.key) ?? []).map((d) => (
-                  <DeskBlock key={d.id} desk={d} color="#ffffff" pad={DESK_PAD} />
-                ))}
-                {/* うっすら色を付けてグループのまとまりを見せる */}
-                <g opacity={0.1}>
-                  {g.points.map((p, i) => (
-                    <circle key={i} cx={p.x} cy={p.y} r={GROUP_RADIUS} fill={g.color} />
-                  ))}
-                  {g.edges.map(([a, b], i) => (
-                    <line key={`e${i}`} x1={g.points[a].x} y1={g.points[a].y} x2={g.points[b].x} y2={g.points[b].y}
-                      stroke={g.color} strokeWidth={GROUP_RADIUS * 2} strokeLinecap="round" />
-                  ))}
-                  {(desksByGroup.get(g.key) ?? []).map((d) => (
-                    <DeskBlock key={d.id} desk={d} color={g.color} pad={DESK_PAD} />
-                  ))}
-                </g>
+              <g key={`f-${g.key}`} opacity={mineKey && g.key !== mineKey ? 0.04 : 0.1}>
+                <GroupShape g={g} desks={desksByGroup.get(g.key) ?? []} color={g.color} grow={0} />
               </g>
             ))}
           </g>
@@ -128,6 +94,24 @@ export function SeatMap({
             {labeledDeskIds.has(d.id) ? null : <DeskFront desk={d} />}
           </g>
         ))}
+        {/* グループの枠線（机の上）。グループごとのマスクで「太らせた形 − 元の形」だけを描くので、隣のグループに消されない */}
+        {outlines.length ? (
+          <g className="group-outlines" aria-hidden="true">
+            <defs>
+              {outlines.map((g, gi) => (
+                <mask key={`m-${g.key}`} id={`${maskPrefix}-${gi}`} maskUnits="userSpaceOnUse">
+                  <GroupShape g={g} desks={desksByGroup.get(g.key) ?? []} color="#ffffff" grow={GROUP_LINE} />
+                  <GroupShape g={g} desks={desksByGroup.get(g.key) ?? []} color="#000000" grow={0} />
+                </mask>
+              ))}
+            </defs>
+            {outlines.map((g, gi) => (
+              <g key={`r-${g.key}`} mask={`url(#${maskPrefix}-${gi})`} opacity={mineKey && g.key !== mineKey ? 0.35 : 1}>
+                <GroupShape g={g} desks={desksByGroup.get(g.key) ?? []} color={g.color} grow={GROUP_LINE} />
+              </g>
+            ))}
+          </g>
+        ) : null}
         {layout.seats.map((seat) => {
           const v = byNumber.get(seat.number);
           const classes = ["seat-dot"];
@@ -211,6 +195,34 @@ const GROUP_LINE = 5;
  * 通路をはさんだ隣の島（約 30 cm）とは重ならない大きさ。
  */
 const DESK_PAD = 8;
+
+/** グループの形（席の丸・席をつなぐ線・グループの机）を grow だけ太らせて塗る */
+function GroupShape({
+  g,
+  desks,
+  color,
+  grow,
+}: {
+  g: { points: { x: number; y: number }[]; edges: [number, number][] };
+  desks: Desk[];
+  color: string;
+  grow: number;
+}) {
+  return (
+    <>
+      {g.points.map((p, i) => (
+        <circle key={`p${i}`} cx={p.x} cy={p.y} r={GROUP_RADIUS + grow} fill={color} />
+      ))}
+      {g.edges.map(([a, b], i) => (
+        <line key={`e${i}`} x1={g.points[a].x} y1={g.points[a].y} x2={g.points[b].x} y2={g.points[b].y}
+          stroke={color} strokeWidth={(GROUP_RADIUS + grow) * 2} strokeLinecap="round" />
+      ))}
+      {desks.map((d) => (
+        <DeskBlock key={d.id} desk={d} color={color} pad={DESK_PAD + grow} />
+      ))}
+    </>
+  );
+}
 
 /** 机と席をまとめた四角（机の向きに合わせて回す）を pad だけ広げて角丸で塗る */
 function DeskBlock({ desk, color, pad }: { desk: Desk; color: string; pad: number }) {
