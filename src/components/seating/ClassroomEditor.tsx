@@ -602,9 +602,9 @@ export function ClassroomEditor({
               </select>
             </label>
             <label>縦 <input className="input input--narrow" type="number" min={1} max={30} value={arrange.rows}
-              onChange={(e) => setArrange((a) => ({ ...a, rows: clamp(toInt(e.target.value, 1), 1, 30) }))} /> 列</label>
+              onChange={(e) => setArrange((a) => ({ ...a, rows: clamp(toInt(e.target.value, 1), 1, 30) }))} /> 台</label>
             <label>横 <input className="input input--narrow" type="number" min={1} max={30} value={arrange.cols}
-              onChange={(e) => setArrange((a) => ({ ...a, cols: clamp(toInt(e.target.value, 1), 1, 30) }))} /> 台</label>
+              onChange={(e) => setArrange((a) => ({ ...a, cols: clamp(toInt(e.target.value, 1), 1, 30) }))} /> 列</label>
             <label>左右の間隔 <input className="input input--narrow" type="number" min={20} max={1000} step={5} value={arrange.pitchX}
               onChange={(e) => setArrange((a) => ({ ...a, pitchX: clamp(toInt(e.target.value, 80), 20, 1000) }))} /> cm</label>
             <label>前後の間隔 <input className="input input--narrow" type="number" min={20} max={1000} step={5} value={arrange.pitchY}
