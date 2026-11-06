@@ -1,0 +1,18 @@
+# /etc/systemd/system/synclie-seat-assign-update.service
+# GitHub の main を取りに行き、CI 成功済みの新コミットをビルドして切り替える。
+# synclie-seat-assign-update.timer から 5 分ごとに起動される。
+# root で動くのは symlink 切り替えと systemctl restart のためだけで、
+# git / npm ci / npm run build はスクリプト内で runuser -u synclie で実行する。
+[Unit]
+Description=Synclie seat-assign auto update (pull main from GitHub)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/synclie-seat-assign-update
+# npm ci + next build が長引いても打ち切らない上限
+TimeoutStartSec=30min
+# ビルドで VPS 上の他アプリ（3005/3006/3007/3095）を圧迫しないよう優先度を下げる
+Nice=10
+IOSchedulingClass=idle
