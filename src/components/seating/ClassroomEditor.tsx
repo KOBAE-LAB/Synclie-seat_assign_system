@@ -41,6 +41,7 @@ const EMPTY: Selection = new Set();
 type Room = Omit<ClassroomLayout, "seats">;
 
 const SNAP = 5;
+const SEAT_NUMBER_MAX = 9999;
 const HISTORY_MAX = 50;
 const DESK_TYPES = Object.keys(DESK_SPECS) as DeskType[];
 const FIXTURE_TYPES = Object.keys(FIXTURE_SPECS) as FixtureType[];
@@ -86,6 +87,9 @@ export function ClassroomEditor({
   const [roomDraft, setRoomDraft] = useState<{ width: string; height: string } | null>(null);
   const [selection, setSelection] = useState<Selection>(EMPTY);
   const [multiMode, setMultiMode] = useState(false);
+  /** 「クリックで番号を振る」中なら、次に振る番号 */
+  const [numbering, setNumbering] = useState<number | null>(null);
+  const [numberingStart, setNumberingStart] = useState("1");
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [customSeats, setCustomSeats] = useState(3);
   const [customW, setCustomW] = useState(150);
@@ -196,6 +200,57 @@ export function ClassroomEditor({
       const seats = n < desk.seats.length ? desk.seats.slice(0, n) : [...desk.seats, ...Array.from({ length: n - desk.seats.length }, () => next++)];
       return { ...r, desks: r.desks.map((d) => (d.id === desk.id ? { ...d, seats } : d)) };
     });
+  }
+
+  /**
+   * 席番号を手で変える。その番号をほかの席が使っていれば、その席と番号を入れ替える（番号が重ならない）。
+   * 戻り値は入れ替えた相手の席番号（なければ null）
+   */
+  function setSeatNumber(deskId: string, index: number, n: number) {
+    if (!Number.isInteger(n) || n < 1 || n > SEAT_NUMBER_MAX) {
+      setNotice(`席番号は 1〜${SEAT_NUMBER_MAX} の整数にしてください。`);
+      return;
+    }
+    const desk = room.desks.find((d) => d.id === deskId);
+    const old = desk?.seats[index];
+    if (old === undefined || old === n) return;
+    const holder = room.desks.find((d) => d.seats.includes(n));
+    update((r) => ({
+      ...r,
+      desks: r.desks.map((d) => {
+        if (d.id !== deskId && !d.seats.includes(n)) return d;
+        return {
+          ...d,
+          seats: d.seats.map((v, i) => (d.id === deskId && i === index ? n : v === n ? old : v)),
+        };
+      }),
+    }));
+    setNotice(holder ? `${n}番を使っていた席と入れ替えました（その席は ${old}番になりました）。` : "");
+  }
+
+  /** 「クリックで番号を振る」で席を押したとき */
+  function numberSeat(deskId: string, seatNumber: number) {
+    if (numbering === null) return;
+    const desk = room.desks.find((d) => d.id === deskId);
+    const index = desk ? desk.seats.indexOf(seatNumber) : -1;
+    if (index < 0) return;
+    if (numbering > SEAT_NUMBER_MAX) {
+      setNotice(`席番号は ${SEAT_NUMBER_MAX} までです。`);
+      return;
+    }
+    setSeatNumber(deskId, index, numbering);
+    setNumbering(numbering + 1);
+  }
+
+  function startNumbering() {
+    const n = toInt(numberingStart, 1);
+    if (n < 1 || n > SEAT_NUMBER_MAX) {
+      setNotice(`開始番号は 1〜${SEAT_NUMBER_MAX} にしてください。`);
+      return;
+    }
+    clearSelection();
+    setNotice("");
+    setNumbering(n);
   }
 
   function removeSelected() {
@@ -436,6 +491,11 @@ export function ClassroomEditor({
       selectAll();
       return;
     }
+    if (e.key === "Escape" && numbering !== null) {
+      e.preventDefault();
+      setNumbering(null);
+      return;
+    }
     if (!selectedCount) return;
     if (mod && e.key.toLowerCase() === "d") {
       e.preventDefault();
@@ -451,7 +511,10 @@ export function ClassroomEditor({
       Backspace: removeSelected,
       r: () => rotateSelected(5),
       R: () => rotateSelected(-5),
-      Escape: clearSelection,
+      Escape: () => {
+        clearSelection();
+        setNumbering(null);
+      },
     };
     const fn = keys[e.key];
     if (fn) {
@@ -583,6 +646,23 @@ export function ClassroomEditor({
             <button type="button" className="button button--secondary button--small" onClick={() => update((r) => renumberSeats(withSeats(r)))} disabled={!room.desks.length}>
               席番号を前から振り直す
             </button>
+            {numbering === null ? (
+              <span className="numbering-start">
+                <button type="button" className="button button--secondary button--small" onClick={startNumbering} disabled={!room.desks.length}
+                  title="席を押した順に番号を振ります">
+                  クリックで番号を振る
+                </button>
+                <label className="small">
+                  開始
+                  <input className="input input--tiny" type="number" min={1} max={SEAT_NUMBER_MAX} value={numberingStart}
+                    onChange={(e) => setNumberingStart(e.target.value)} aria-label="番号を振るときの開始番号" />
+                </label>
+              </span>
+            ) : (
+              <button type="button" className="button button--small" onClick={() => setNumbering(null)}>
+                番号を振るのを終える
+              </button>
+            )}
             <button type="button" className="button button--secondary button--small"
               onClick={() => { if (window.confirm("机と備品をすべて消しますか？")) { update((r) => ({ ...r, desks: [], fixtures: [] })); clearSelection(); } }}>
               すべて消す
@@ -593,6 +673,11 @@ export function ClassroomEditor({
             </span>
           </div>
 
+          {numbering !== null ? (
+            <p className="numbering-banner" role="status">
+              席を押した順に番号を振ります。次は <strong>{numbering}番</strong>。すでに使われている番号は、その席と入れ替わります。終わったら「番号を振るのを終える」か Esc。
+            </p>
+          ) : null}
           <svg
             ref={svgRef}
             className="editor__svg"
@@ -622,8 +707,14 @@ export function ClassroomEditor({
               );
             })}
             {layout.seats.map((s) => (
-              <g key={s.number} className="seat-dot seat-dot--edit"
+              <g key={s.number} className={numbering !== null ? "seat-dot seat-dot--edit seat-dot--numbering" : "seat-dot seat-dot--edit"}
                 onPointerDown={(e) => {
+                  if (numbering !== null) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    numberSeat(s.deskId, s.number);
+                    return;
+                  }
                   const d = room.desks.find((x) => x.id === s.deskId);
                   if (d) onItemPointerDown(e, "desk", d);
                 }}>
@@ -653,7 +744,7 @@ export function ClassroomEditor({
           {selectedDesk ? (
             <>
               <h3>{DESK_SPECS[selectedDesk.type].label}</h3>
-              <p className="small">席番号：{selectedDesk.seats.join("・")}</p>
+              <SeatNumberFields desk={selectedDesk} onChange={(index, n) => setSeatNumber(selectedDesk.id, index, n)} />
               <RotationControl value={selectedDesk.rotation} onChange={(rotation) => patchDesk(selectedDesk.id, { rotation })} />
               <button type="button" className="button button--secondary button--small button--block" onClick={() => faceBoard(true)} disabled={!faceTarget || selectedDesk.type === "round4"}>
                 黒板の方を向く
@@ -757,6 +848,40 @@ function ItemButtons({ onDuplicate, onDelete }: { onDuplicate: () => void; onDel
     <div className="stack" style={{ marginTop: 12 }}>
       <button type="button" className="button button--secondary button--small" onClick={onDuplicate}>複製</button>
       <button type="button" className="button button--secondary button--small" onClick={onDelete}>削除</button>
+    </div>
+  );
+}
+
+/** 選んだ机の席番号を手で変える欄（欄を離れたとき・Enter で確定） */
+function SeatNumberFields({ desk, onChange }: { desk: Desk; onChange: (index: number, n: number) => void }) {
+  return (
+    <div className="seat-number-fields">
+      <span className="field__label">席番号</span>
+      <div className="stack">
+        {desk.seats.map((n, i) => (
+          <input
+            // 番号が外から変わったら欄を作り直して表示を合わせる
+            key={`${desk.id}-${i}-${n}`}
+            className="input input--tiny"
+            type="number"
+            min={1}
+            max={SEAT_NUMBER_MAX}
+            defaultValue={n}
+            aria-label={desk.seats.length > 1 ? `${i + 1}つ目の席の番号` : "席番号"}
+            onBlur={(e) => {
+              const v = Math.round(Number(e.target.value));
+              if (v !== n) onChange(i, v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
+          />
+        ))}
+      </div>
+      <span className="field__hint">ほかの席が使っている番号にすると、その席と入れ替わります。</span>
     </div>
   );
 }
