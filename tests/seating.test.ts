@@ -17,7 +17,7 @@ import {
   validateLayout,
   withSeats,
 } from "../src/lib/seating/layout.ts";
-import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, type Desk } from "../src/lib/seating/geometry.ts";
+import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, snapToWall, type Desk } from "../src/lib/seating/geometry.ts";
 import {
   copyClassroomByShareCode,
   deleteClassroom,
@@ -492,4 +492,17 @@ test("講義のグループ：追加・名前と色・席の割り当て・削�
   assert.deepEqual(lecture.seats.filter((s) => s.status === "used").map((s) => s.number), usedBefore);
   regroupLecture(db, teacherId, lectureId, { kind: "none" });
   assert.equal(getLecture(db, teacherId, lectureId)!.groups.length, 0);
+});
+
+test("ドア・窓は壁の近くで壁の線に吸い付き、壁に沿う向きになる", () => {
+  const room = { width: 800, height: 1000 };
+  assert.deepEqual(snapToWall(780, 500, room), { x: 800, y: 500, rotation: 90 }, "右の壁");
+  assert.deepEqual(snapToWall(15, 300, room), { x: 0, y: 300, rotation: 90 }, "左の壁");
+  assert.deepEqual(snapToWall(400, 990, room), { x: 400, y: 1000, rotation: 0 }, "後ろの壁");
+  assert.deepEqual(snapToWall(400, 30, room), { x: 400, y: 0, rotation: 0 }, "前の壁");
+  assert.equal(snapToWall(400, 500, room), null, "壁から遠いと吸い付かない");
+  // 壁の上（埋め込み）にある備品は、部屋の大きさを広げない
+  const l = withSeats({ ...emptyLayout(800, 1000), fixtures: [{ id: "d", type: "door", x: 800, y: 500, w: 90, h: 10, rotation: 90 }] });
+  const r = validateLayout(JSON.stringify(l));
+  assert.ok(r.ok && r.layout.width === 800 && r.layout.height === 1000);
 });

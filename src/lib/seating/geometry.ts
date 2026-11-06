@@ -215,3 +215,32 @@ export function rotationToFaceWall(from: Point, wall: { x: number; y: number; ro
   const fy = toward >= 0 ? ny : -ny;
   return normalizeRotation((Math.atan2(fx, -fy) * 180) / Math.PI);
 }
+
+/** 壁に沿わせる備品（ドア・窓） */
+export const WALL_FIXTURES: readonly FixtureType[] = ["door", "window"];
+export const WALL_SNAP_DISTANCE = 40;
+
+/**
+ * 点 (x, y) がいちばん近い壁から threshold 以内なら、その壁の線の上に乗せ、壁に沿う向き
+ * （上下の壁は 0°、左右の壁は 90°）を返す。遠ければ null。
+ */
+export function snapToWall(
+  x: number,
+  y: number,
+  room: { width: number; height: number },
+  threshold = WALL_SNAP_DISTANCE,
+): { x: number; y: number; rotation: number } | null {
+  const walls = [
+    { d: y, at: { x, y: 0, rotation: 0 } },
+    { d: room.height - y, at: { x, y: room.height, rotation: 0 } },
+    { d: x, at: { x: 0, y, rotation: 90 } },
+    { d: room.width - x, at: { x: room.width, y, rotation: 90 } },
+  ].sort((a, b) => a.d - b.d);
+  const nearest = walls[0];
+  if (Math.abs(nearest.d) > threshold) return null;
+  return {
+    x: Math.round(Math.max(0, Math.min(room.width, nearest.at.x))),
+    y: Math.round(Math.max(0, Math.min(room.height, nearest.at.y))),
+    rotation: nearest.at.rotation,
+  };
+}
