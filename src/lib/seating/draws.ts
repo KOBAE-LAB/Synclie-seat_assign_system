@@ -129,3 +129,33 @@ export function listDraws(db: Db, lectureId: number): DrawRow[] {
       .all(lectureId) as (Omit<DrawRow, "deviceTag"> & { deviceId: string | null })[]
   ).map(({ deviceId, ...r }) => ({ ...r, deviceTag: deviceId ? deviceId.slice(0, 4).toUpperCase() : null }));
 }
+
+export type MoveOutcome = "moved" | "swapped" | "same" | "not_found";
+
+/**
+ * 抽選結果を別の席へ移す。移動先が抽選済みなら 2 人の席を入れ替える。
+ * 部分 UNIQUE インデックスに一時的に引っかからないよう、入れ替え時は片方をいったん取消扱いにしてから戻す。
+ */
+export function moveDraw(db: Db, lectureId: number, drawId: number, targetSeatNumber: number): MoveOutcome {
+  return db.transaction((): MoveOutcome => {
+    const draw = db
+      .prepare("SELECT id, seat_id FROM draws WHERE id = ? AND lecture_id = ? AND cancelled = 0")
+      .get(drawId, lectureId) as { id: number; seat_id: number } | undefined;
+    const target = db
+      .prepare("SELECT id FROM lecture_seats WHERE lecture_id = ? AND seat_number = ?")
+      .get(lectureId, targetSeatNumber) as { id: number } | undefined;
+    if (!draw || !target) return "not_found";
+    if (draw.seat_id === target.id) return "same";
+    const other = db
+      .prepare("SELECT id FROM draws WHERE lecture_id = ? AND seat_id = ? AND cancelled = 0")
+      .get(lectureId, target.id) as { id: number } | undefined;
+    if (!other) {
+      db.prepare("UPDATE draws SET seat_id = ? WHERE id = ?").run(target.id, draw.id);
+      return "moved";
+    }
+    db.prepare("UPDATE draws SET cancelled = 1 WHERE id = ?").run(other.id);
+    db.prepare("UPDATE draws SET seat_id = ? WHERE id = ?").run(target.id, draw.id);
+    db.prepare("UPDATE draws SET seat_id = ?, cancelled = 0 WHERE id = ?").run(draw.seat_id, other.id);
+    return "swapped";
+  }).immediate();
+}

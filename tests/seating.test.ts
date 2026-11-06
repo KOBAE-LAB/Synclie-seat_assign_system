@@ -16,8 +16,8 @@ import {
 } from "../src/lib/seating/layout.ts";
 import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, type Desk } from "../src/lib/seating/geometry.ts";
 import { saveClassroom, deleteClassroom, listClassrooms } from "../src/lib/seating/classrooms.ts";
-import { createLecture, getLecture, getLectureByToken, setAcceptState } from "../src/lib/seating/lectures.ts";
-import { cancelDraw, drawForDevice, listDraws, proxyDraw, resetDraws } from "../src/lib/seating/draws.ts";
+import { createLecture, getLecture, getLectureByToken, setAcceptState, toggleSeatStatus } from "../src/lib/seating/lectures.ts";
+import { cancelDraw, drawForDevice, listDraws, moveDraw, proxyDraw, resetDraws } from "../src/lib/seating/draws.ts";
 
 /** 旧形式（マス目）の JSON：cols 列のうち 4 列目ごとが通路 */
 function oldGridJson(rows: number, cols: number) {
@@ -250,4 +250,42 @@ test("講義作成後に教室を編集しても講義の座席図は変わら�
   assert.equal(listClassrooms(db, teacherId)[0].seatCount, 1);
   assert.equal(deleteClassroom(db, teacherId, classroomId), "in_use");
   assert.equal(getLecture(db, teacherId, lectureId)!.seats.length, 24);
+});
+
+test("席の移動と入れ替え", () => {
+  const { lectureId, token } = makeLecture(24);
+  setAcceptState(db, teacherId, lectureId, "open");
+  const a = drawForDevice(db, token, uuid(1));
+  const b = drawForDevice(db, token, uuid(2));
+  assert.ok(a.ok && b.ok);
+  const free = getLecture(db, teacherId, lectureId)!.seats.find(
+    (s) => s.number !== a.seatNumber && s.number !== b.seatNumber,
+  )!.number;
+  // 空いている席へ移動
+  assert.equal(moveDraw(db, lectureId, a.drawId, free), "moved");
+  assert.equal(listDraws(db, lectureId).find((d) => d.id === a.drawId)!.seatNumber, free);
+  // 抽選済みの席へ移動すると入れ替え
+  assert.equal(moveDraw(db, lectureId, a.drawId, b.seatNumber), "swapped");
+  const rows = listDraws(db, lectureId);
+  assert.equal(rows.find((d) => d.id === a.drawId)!.seatNumber, b.seatNumber);
+  assert.equal(rows.find((d) => d.id === b.drawId)!.seatNumber, free);
+  assert.equal(rows.length, 2);
+  assert.equal(moveDraw(db, lectureId, a.drawId, b.seatNumber), "same");
+  assert.equal(moveDraw(db, lectureId, a.drawId, 999), "not_found");
+  // 学生から見ても新しい席になっている
+  const again = drawForDevice(db, token, uuid(2));
+  assert.ok(again.ok && again.seatNumber === free);
+});
+
+test("使用席・予備席の切り替えは抽選の優先順に反映される", () => {
+  const { lectureId, token } = makeLecture(1);
+  const lecture = getLecture(db, teacherId, lectureId)!;
+  const used = lecture.seats.find((s) => s.status === "used")!.number;
+  const spare = lecture.seats.find((s) => s.status === "spare")!.number;
+  assert.equal(toggleSeatStatus(db, teacherId, lectureId, used), "spare");
+  assert.equal(toggleSeatStatus(db, teacherId, lectureId, spare), "used");
+  assert.equal(toggleSeatStatus(db, teacherId + 1, lectureId, spare), null, "他の講師は変更できない");
+  setAcceptState(db, teacherId, lectureId, "open");
+  const r = drawForDevice(db, token, uuid(1));
+  assert.ok(r.ok && r.seatNumber === spare, "使用席にした席から割り当てる");
 });
