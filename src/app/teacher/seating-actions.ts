@@ -2,8 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
-import { isSameOrigin, requireTeacher } from "@/lib/auth/server";
-import { classroomNameError, deleteClassroom, saveClassroom } from "@/lib/seating/classrooms";
+import { clientIp, isSameOrigin, requireTeacher } from "@/lib/auth/server";
+import {
+  classroomNameError,
+  copyClassroomByShareCode,
+  deleteClassroom,
+  issueShareCode,
+  revokeShareCode,
+  saveClassroom,
+} from "@/lib/seating/classrooms";
+import { RATE_LIMIT_MESSAGE, RateLimiter } from "@/lib/auth/rate-limit";
 import { parseLayout, type GroupMode } from "@/lib/seating/layout";
 import {
   createLecture,
@@ -12,8 +20,13 @@ import {
   getLecture,
   MESSAGE_MAX,
   setAcceptState,
+  FOLDER_MAX,
   issueTtCode,
+  MEMO_MAX,
+  parseTags,
   revokeTtCode,
+  setArchived,
+  updateLectureOrganize,
   toggleSeatStatus,
   updateLectureInfo,
   type AcceptState,
@@ -201,6 +214,11 @@ export async function updateLectureAction(lectureId: number, _prev: ActionState,
   }
   // ふりがなが空ならここで自動で付ける
   if (messageJa && !messageFurigana) messageFurigana = await safeFurigana(messageJa);
+  const memo = field(formData, "memo");
+  if (memo.length > MEMO_MAX) return { error: `メモは ${MEMO_MAX} 文字以内にしてください。` };
+  const folder = field(formData, "folder");
+  if (folder.length > FOLDER_MAX) return { error: `フォルダ名は ${FOLDER_MAX} 文字以内にしてください。` };
+  updateLectureOrganize(getDb(), owned.teacher.teacherId, lectureId, { memo, folder, tags: parseTags(field(formData, "tags")) });
   updateLectureInfo(getDb(), owned.teacher.teacherId, lectureId, {
     name,
     lectureDate: date || null,
@@ -214,11 +232,42 @@ export async function updateLectureAction(lectureId: number, _prev: ActionState,
 export async function issueTtCodeAction(lectureId: number): Promise<void> {
   const owned = await ownedLecture(lectureId);
   if (owned) issueTtCode(getDb(), owned.teacher.teacherId, lectureId);
-  redirect(`/teacher/lectures/${lectureId}#tt`);
+  redirect(`/teacher/lectures/${lectureId}?tt=${Date.now()}#tt`);
 }
 
 export async function revokeTtCodeAction(lectureId: number): Promise<void> {
   const owned = await ownedLecture(lectureId);
   if (owned) revokeTtCode(getDb(), owned.teacher.teacherId, lectureId);
-  redirect(`/teacher/lectures/${lectureId}#tt`);
+  redirect(`/teacher/lectures/${lectureId}?tt=${Date.now()}#tt`);
+}
+
+export async function setArchivedAction(lectureId: number, archived: boolean): Promise<void> {
+  const owned = await ownedLecture(lectureId);
+  if (owned) setArchived(getDb(), owned.teacher.teacherId, lectureId, archived);
+  redirect(archived ? "/teacher?archived=done" : `/teacher/lectures/${lectureId}`);
+}
+
+export async function issueShareCodeAction(classroomId: number): Promise<void> {
+  const teacher = await teacherOrNull();
+  if (teacher) issueShareCode(getDb(), teacher.teacherId, classroomId);
+  redirect(`/teacher/classrooms/${classroomId}?share=${Date.now()}#share`);
+}
+
+export async function revokeShareCodeAction(classroomId: number): Promise<void> {
+  const teacher = await teacherOrNull();
+  if (teacher) revokeShareCode(getDb(), teacher.teacherId, classroomId);
+  redirect(`/teacher/classrooms/${classroomId}?share=${Date.now()}#share`);
+}
+
+const globalForShare = globalThis as unknown as { __seatAssignShareLimiter?: RateLimiter };
+// 共有コードの総当たりを防ぐ：10 分に 20 回まで
+const shareLimiter = (globalForShare.__seatAssignShareLimiter ??= new RateLimiter({ limit: 20, windowMs: 10 * 60 * 1000 }));
+
+export async function copyClassroomAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const teacher = await teacherOrNull();
+  if (!teacher) return { error: BAD_ORIGIN };
+  if (!shareLimiter.consume(await clientIp())) return { error: RATE_LIMIT_MESSAGE };
+  const id = copyClassroomByShareCode(getDb(), teacher.teacherId, field(formData, "code"));
+  if (!id) return { error: "共有コードが違うか、無効にされています。" };
+  redirect(`/teacher/classrooms/${id}?copied=1`);
 }

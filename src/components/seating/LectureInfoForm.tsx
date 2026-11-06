@@ -13,10 +13,21 @@ export function LectureInfoForm({
   lectureId,
   initial,
   translationAvailable,
+  folders,
 }: {
   lectureId: number;
-  initial: { name: string; lectureDate: string; messageJa: string; messageFurigana: string; messageEn: string };
+  initial: {
+    name: string;
+    lectureDate: string;
+    messageJa: string;
+    messageFurigana: string;
+    messageEn: string;
+    memo: string;
+    folder: string;
+    tags: string[];
+  };
   translationAvailable: boolean;
+  folders: string[];
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     updateLectureAction.bind(null, lectureId),
@@ -86,6 +97,26 @@ export function LectureInfoForm({
           {!translationAvailable ? <span className="small muted">自動英訳はサーバーに API キーを設定すると使えます。手で入力もできます。</span> : null}
         </div>
       </div>
+
+      <fieldset className="editor-panel">
+        <legend>整理用（学生には見えません）</legend>
+        <label className="field">
+          <span className="field__label">メモ</span>
+          <textarea className="input" name="memo" rows={3} maxLength={2000} defaultValue={initial.memo} placeholder="例：教科書 p.20 から。欠席連絡 2 名。" />
+        </label>
+        <label className="field">
+          <span className="field__label">フォルダ</span>
+          <input className="input" name="folder" maxLength={50} defaultValue={initial.folder} list="folder-list" placeholder="例：2026 前期 情報リテラシー" />
+          <datalist id="folder-list">
+            {folders.map((f) => <option key={f} value={f} />)}
+          </datalist>
+        </label>
+        <label className="field">
+          <span className="field__label">タグ</span>
+          <input className="input" name="tags" defaultValue={initial.tags.join(", ")} placeholder="例：1年, 必修, グループワーク" />
+          <span className="field__hint">カンマ（,）か読点（、）で区切ります。10 個まで。</span>
+        </label>
+      </fieldset>
 
       {note ? <p className="small" role="status">{busy ? "処理中…" : note}</p> : null}
       {state.error ? <p className="form-error" role="alert">{state.error}</p> : null}
