@@ -1404,3 +1404,42 @@ rt {
   color: var(--brand);
   font-weight: 700;
 }
+
+/* 席番号を手で変える */
+.input--tiny {
+  width: 5em;
+  padding: 0.35rem 0.5rem;
+}
+.seat-number-fields {
+  margin-bottom: var(--space-3);
+}
+.seat-number-fields .stack {
+  gap: var(--space-1);
+  margin: var(--space-1) 0;
+}
+.numbering-start {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.numbering-start label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.numbering-banner {
+  background: var(--brand-tint);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-control);
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+}
+.seat-dot--numbering {
+  cursor: pointer;
+}
+.seat-dot--numbering:hover circle {
+  fill: var(--brand-tint);
+  stroke: var(--brand);
+  stroke-width: 4;
+}
