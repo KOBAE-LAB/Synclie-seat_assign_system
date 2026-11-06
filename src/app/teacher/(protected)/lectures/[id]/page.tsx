@@ -95,7 +95,7 @@ export default async function LecturePage({
 
       <section className="card">
         <h2>座席図</h2>
-        <p className="small muted">塗りつぶし＝抽選済み、点線＝予備席。上辺の色がグループです。（5 秒ごとに自動更新）</p>
+        <p className="small muted">丸の色＝グループ、点線の丸＝予備席、塗りつぶし＝抽選済み、▲＝机の向き（5 秒ごとに自動更新）</p>
         <SeatMap
           layout={lecture.layout}
           seats={lecture.seats.map((s) => ({

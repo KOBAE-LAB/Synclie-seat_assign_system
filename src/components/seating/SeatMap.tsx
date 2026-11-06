@@ -1,4 +1,6 @@
+import { SEAT_RADIUS } from "@/lib/seating/geometry";
 import type { ClassroomLayout } from "@/lib/seating/layout";
+import { contentViewBox, DeskBody, DeskFront, FixtureShape } from "./Shapes";
 
 export type SeatView = {
   number: number;
@@ -11,7 +13,7 @@ export type SeatView = {
   label?: string | null;
 };
 
-/** マス目の座席図。上が黒板（前方） */
+/** 教室の座席図（机・備品・座席番号）。黒板などの位置は教室エディタで置いたとおり */
 export function SeatMap({
   layout,
   seats,
@@ -25,36 +27,41 @@ export function SeatMap({
   const hasMine = seats.some((s) => s.mine);
   return (
     <div className={`seat-map seat-map--${size}`}>
-      <div className="seat-map__board">黒板・前</div>
-      <div
-        className="seat-map__grid"
-        style={{ gridTemplateColumns: `repeat(${layout.cols}, minmax(0, ${size === "small" ? 48 : 60}px))` }}
-        role="img"
-        aria-label="座席図"
-      >
+      <svg viewBox={contentViewBox(layout)} className="seat-map__svg" role="img" aria-label="座席図">
+        {layout.fixtures.map((f) => (
+          <FixtureShape key={f.id} fixture={f} />
+        ))}
+        {layout.desks.map((d) => (
+          <g key={d.id}>
+            <DeskBody desk={d} />
+            <DeskFront desk={d} />
+          </g>
+        ))}
         {layout.seats.map((seat) => {
           const v = byNumber.get(seat.number);
-          const classes = ["seat"];
-          if (v?.taken) classes.push("seat--taken");
-          if (v?.spare) classes.push("seat--spare");
-          if (v?.mine) classes.push("seat--mine");
-          if (hasMine && !v?.mine) classes.push("seat--dim");
+          const classes = ["seat-dot"];
+          if (v?.taken) classes.push("seat-dot--taken");
+          if (v?.spare) classes.push("seat-dot--spare");
+          if (v?.mine) classes.push("seat-dot--mine");
+          if (hasMine && !v?.mine) classes.push("seat-dot--dim");
           return (
-            <div
-              key={seat.number}
-              className={classes.join(" ")}
-              style={{
-                gridRow: seat.row + 1,
-                gridColumn: seat.col + 1,
-                borderTopColor: v?.color ?? undefined,
-              }}
-              title={v?.label ? `${seat.number}番（${v.label}）` : `${seat.number}番`}
-            >
-              {seat.number}
-            </div>
+            <g key={seat.number} className={classes.join(" ")}>
+              <title>{v?.label ? `${seat.number}番（${v.label}）` : `${seat.number}番`}</title>
+              <circle
+                cx={seat.x}
+                cy={seat.y}
+                r={SEAT_RADIUS}
+                style={v?.color ? { stroke: v.color } : undefined}
+                vectorEffect="non-scaling-stroke"
+              />
+              {v?.mine ? <circle className="seat-dot__ring" cx={seat.x} cy={seat.y} r={SEAT_RADIUS + 9} /> : null}
+              <text x={seat.x} y={seat.y + 6} textAnchor="middle">
+                {seat.number}
+              </text>
+            </g>
           );
         })}
-      </div>
+      </svg>
     </div>
   );
 }
