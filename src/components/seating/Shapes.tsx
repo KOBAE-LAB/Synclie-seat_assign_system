@@ -62,10 +62,14 @@ export function FixtureShape({ fixture, selected = false }: { fixture: Fixture; 
   );
 }
 
-/** 表示範囲：中身全体に余白を付けた矩形（空なら部屋全体） */
+/** 表示範囲：教室の外枠と中身（机・備品）全体に余白を付けた矩形 */
 export function contentViewBox(layout: ClassroomLayout, pad = 30): string {
-  const box = mergeBoxes([...layout.desks.map(deskBox), ...layout.fixtures.map(fixtureBox)]);
-  if (!box) return `0 0 ${layout.width} ${layout.height}`;
+  // 教室の外枠（壁）も入れる。壁の外に出た表示名なども切れないよう余白を付ける
+  const box = mergeBoxes([
+    { minX: 0, minY: 0, maxX: layout.width, maxY: layout.height },
+    ...layout.desks.map(deskBox),
+    ...layout.fixtures.map(fixtureBox),
+  ])!;
   const minX = Math.floor(box.minX - pad);
   const minY = Math.floor(box.minY - pad);
   return `${minX} ${minY} ${Math.ceil(box.maxX - box.minX + pad * 2)} ${Math.ceil(box.maxY - box.minY + pad * 2)}`;

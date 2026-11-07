@@ -1555,3 +1555,10 @@ rt {
 .group-outlines {
   pointer-events: none;
 }
+
+/* 座席図の教室の外枠（壁） */
+.room-wall {
+  fill: #fbfaf8;
+  stroke: #3a3a3a;
+  stroke-width: 3;
+}

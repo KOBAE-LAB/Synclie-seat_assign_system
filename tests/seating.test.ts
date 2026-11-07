@@ -19,7 +19,7 @@ import {
   validateLayout,
   withSeats,
 } from "../src/lib/seating/layout.ts";
-import { deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, snapToWall, type Desk } from "../src/lib/seating/geometry.ts";
+import { deskBox, deskSeatPositions, normalizeRotation, rotationToFace, rotationToFaceWall, snapToWall, type Desk } from "../src/lib/seating/geometry.ts";
 import {
   copyClassroomByShareCode,
   deleteClassroom,
@@ -102,9 +102,9 @@ test("机が部屋からはみ出していたら、拒否せず部屋を広げ�
   const shrunk = { ...withSeats({ ...emptyLayout(1000, 800), desks }), width: 200, height: 200 };
   const r = validateLayout(JSON.stringify(shrunk));
   assert.ok(r.ok);
-  const maxX = Math.max(...desks.map((d) => d.x));
-  const maxY = Math.max(...desks.map((d) => d.y));
-  assert.equal(r.layout.width, maxX, "机の中心が入るところまで広がる（余白は足さない）");
+  const maxX = Math.ceil(Math.max(...desks.map((d) => deskBox(d).maxX)));
+  const maxY = Math.ceil(Math.max(...desks.map((d) => deskBox(d).maxY)));
+  assert.equal(r.layout.width, maxX, "机（席を含む）が入るところまで広がる（余白は足さない）");
   assert.equal(r.layout.height, maxY);
   assert.equal(r.layout.seats.length, 48);
   const extent = contentExtent(r.layout);
@@ -136,7 +136,7 @@ test("部屋を小さくすると、はみ出す机・備品を新しい壁ぎ�
   assert.equal(moved, 2);
   assert.equal(layout.width, 700);
   assert.equal(layout.fixtures.find((f) => f.id === "door")!.x, 700);
-  assert.equal(layout.desks[0].x, 700);
+  assert.ok(deskBox(layout.desks[0]).maxX <= 700, "机は席も含めて壁の内側に収まる");
   assert.equal(resizeRoom(l, 1000, 800).moved, 0, "広げるときは何も動かさない");
 });
 
