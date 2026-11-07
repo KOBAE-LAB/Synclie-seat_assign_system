@@ -74,6 +74,8 @@ export function SeatMap({
   return (
     <div className={`seat-map seat-map--${size}`}>
       <svg viewBox={contentViewBox(layout)} className="seat-map__svg" role="img" aria-label="座席図">
+        {/* 教室の外枠（壁）。ドア・窓などの備品はこの上に重ねて描く */}
+        <rect className="room-wall" x={0} y={0} width={layout.width} height={layout.height} vectorEffect="non-scaling-stroke" />
         {layout.fixtures.map((f) => (
           <FixtureShape key={f.id} fixture={f} />
         ))}

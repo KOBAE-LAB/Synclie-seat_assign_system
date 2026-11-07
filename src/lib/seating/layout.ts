@@ -257,31 +257,39 @@ export function parseLayout(input: unknown): ClassroomLayout | null {
 }
 
 /**
- * 部屋の中身（机・備品）の中心がすべて入る最小の幅・奥行き（ROOM_MIN 以上）。
- * 壁に沿って置いた備品（ドア・窓など）は中心が壁の上にあるので、余白は足さない
- * （余白を足すと、保存するたびに部屋が少しずつ広がってしまう）。
+ * 部屋の中身が入る最小の幅・奥行き（ROOM_MIN 以上）。
+ * 机は席も含めた外形がすべて入る大きさ。壁に沿って置く備品（ドア・窓など）は中心が壁の上にあるので中心で判定する
+ * （外形で判定すると、保存するたびに部屋が少しずつ広がってしまう）。
  */
 export function contentExtent(layout: Pick<ClassroomLayout, "desks" | "fixtures">): { width: number; height: number } {
-  const items = [...layout.desks, ...layout.fixtures];
+  const boxes = layout.desks.map(deskBox);
   return {
-    width: Math.ceil(Math.max(ROOM_MIN, ...items.map((i) => i.x))),
-    height: Math.ceil(Math.max(ROOM_MIN, ...items.map((i) => i.y))),
+    width: Math.ceil(Math.max(ROOM_MIN, ...boxes.map((b) => b.maxX), ...layout.fixtures.map((f) => f.x))),
+    height: Math.ceil(Math.max(ROOM_MIN, ...boxes.map((b) => b.maxY), ...layout.fixtures.map((f) => f.y))),
   };
 }
 
-/** 部屋を width × height にする。はみ出す机・備品は新しい壁ぎわに寄せる。寄せた数も返す */
+/** 部屋を width × height にする。はみ出す机（席を含む外形）・備品（中心）は新しい壁ぎわに寄せる。寄せた数も返す */
 export function resizeRoom<T extends Pick<ClassroomLayout, "desks" | "fixtures" | "width" | "height">>(
   layout: T,
   width: number,
   height: number,
 ): { layout: T; moved: number } {
   let moved = 0;
-  const fit = <I extends { x: number; y: number }>(i: I): I => {
-    if (i.x <= width && i.y <= height) return i;
+  const desks = layout.desks.map((d) => {
+    const b = deskBox(d);
+    const dx = b.maxX > width ? width - b.maxX : 0;
+    const dy = b.maxY > height ? height - b.maxY : 0;
+    if (!dx && !dy) return d;
     moved++;
-    return { ...i, x: Math.min(i.x, width), y: Math.min(i.y, height) };
-  };
-  return { layout: { ...layout, width, height, desks: layout.desks.map(fit), fixtures: layout.fixtures.map(fit) }, moved };
+    return { ...d, x: Math.max(0, Math.round(d.x + dx)), y: Math.max(0, Math.round(d.y + dy)) };
+  });
+  const fixtures = layout.fixtures.map((f) => {
+    if (f.x <= width && f.y <= height) return f;
+    moved++;
+    return { ...f, x: Math.min(f.x, width), y: Math.min(f.y, height) };
+  });
+  return { layout: { ...layout, width, height, desks, fixtures }, moved };
 }
 
 /** 机どうしのすき間が ISLAND_GAP 以下ならつなげた、席番号のかたまり（島）。島は最小の席番号順 */
